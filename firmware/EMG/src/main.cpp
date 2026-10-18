@@ -60,6 +60,23 @@ byte state = 1;
 bool flagReset=false;
 uint16_t contador_ceros_brutos=0;
 
+void printData() {
+  bool todoCero=true;
+  for(int ch=0;ch<N_CHNLS;ch++){
+    int16_t v=adc.getChannelData(ch);
+    pkt.data[idx][ch]=v;//Lo guardo al paquete de envío
+    if(v!=0) todoCero=false;
+  }
+  contador_ceros_brutos = todoCero ? contador_ceros_brutos + 1 : 0;
+  if(contador_ceros_brutos > 750) flagReset = true;
+
+
+  if(++idx==BATCH){//Cuando tenga 20 muestras
+    pkt.seq=seq++; //Enumeración de dato para verla en orden
+    esp_now_send(rxMac, (uint8_t*)&pkt, sizeof(pkt));
+    idx=0;//Vacio contador
+  }
+}
 
 void setup() {
   
@@ -162,24 +179,3 @@ void loop() {
     ESP.restart();    
   }
 }
-
-
-
-void printData() {
-  bool todoCero=true;
-  for(int ch=0;ch<N_CHNLS;ch++){
-    int16_t v=adc.getChannelData(ch);
-    pkt.data[idx][ch]=v;//Lo guardo al paquete de envío
-    if(v!=0) todoCero=false;
-  }
-  contador_ceros_brutos = todoCero ? contador_ceros_brutos + 1 : 0;
-  if(contador_ceros_brutos > 750) flagReset = true;
-
-
-  if(++idx==BATCH){//Cuando tenga 20 muestras
-    pkt.seq=seq++; //Enumeración de dato para verla en orden
-    esp_now_send(rxMac, (uint8_t*)&pkt, sizeof(pkt));
-    idx=0;//Vacio contador
-  }
-}
-
