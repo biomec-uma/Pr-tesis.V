@@ -46,17 +46,8 @@ ADS119X adc(dataReady_Pin,reset_pin , cs_pin, clk_pin, miso_pin, mosi_pin);
 //Variables del ADS
 bool dataReady = 0;
 bool prev_dataReady = 0;
-//byte received ; 
-//boolean verbosity = 1; 
 byte numberOfChannels;
-//const byte numChars = 32;
-//char receivedChars[numChars];
-//char tempChars[numChars];        
-//int command [2]; 
-//boolean newData = false;
 byte state = 1; 
-//int elapsed = 0 ;
-//long prevMicros = 0 ;
 bool flagReset=false;
 uint16_t contador_ceros_brutos=0;
 
@@ -67,7 +58,11 @@ void printData() {
     pkt.data[idx][ch]=v;//Lo guardo al paquete de envío
     if(v!=0) todoCero=false;
   }
-  contador_ceros_brutos = todoCero ? contador_ceros_brutos + 1 : 0;
+  if (todoCero == true) {
+    contador_ceros_brutos = contador_ceros_brutos + 1;
+  } else {
+    contador_ceros_brutos = 0;
+  }
   if(contador_ceros_brutos > 750) flagReset = true;
 
 
