@@ -44,33 +44,64 @@ ADS119X adc(dataReady_Pin,reset_pin , cs_pin, clk_pin, miso_pin, mosi_pin);
 
 
 //Variables del ADS
-bool dataReady = 0;
-bool prev_dataReady = 0;
-byte numberOfChannels;
-byte state = 1; 
+bool dataReady = false;
+bool prev_dataReady = false;
+byte numberOfChannels = N_CHNLS;
 bool flagReset=false;
 uint16_t contador_ceros_brutos=0;
 
+void serialPrintPaquetes (uint8_t filaVariable, int cadaXmuestras){
+
+  static int cnt = 0;
+  cnt++;
+
+  if (cnt == cadaXmuestras){
+    for(int i=0; i<N_CHNLS; i++){
+
+      if(i>0){
+      Serial.print('\t'); 
+      } 
+      Serial.print(pkt.data[filaVariable][i]);
+    }
+    
+    Serial.println();
+    cnt = 0;
+
+  }
+
+}
+
 void printData() {
   bool todoCero=true;
+  int cadaXmuestras = 5;
   for(int ch=0;ch<N_CHNLS;ch++){
     int16_t v=adc.getChannelData(ch);
     pkt.data[idx][ch]=v;//Lo guardo al paquete de envío
-    if(v!=0) todoCero=false;
+    if(v!=0) {
+      todoCero=false;
+    }
   }
-  if (todoCero == true) {
-    contador_ceros_brutos = contador_ceros_brutos + 1;
-  } else {
-    contador_ceros_brutos = 0;
-  }
-  if(contador_ceros_brutos > 750) flagReset = true;
+  
+  serialPrintPaquetes(idx, cadaXmuestras);
 
-
-  if(++idx==BATCH){//Cuando tenga 20 muestras
+  if(++idx==BATCH){//Cuando tenga 20 muestras pero siempre incrementa antes de evaluar
     pkt.seq=seq++; //Enumeración de dato para verla en orden
     esp_now_send(rxMac, (uint8_t*)&pkt, sizeof(pkt));
     idx=0;//Vacio contador
   }
+
+  if (todoCero == true) {//Comprueba que no se haya quedado atrancado el ADS
+    contador_ceros_brutos = contador_ceros_brutos + 1;
+  } else {
+    contador_ceros_brutos = 0;
+  }
+  if(contador_ceros_brutos > 750) flagReset = true; //Solo se reciben 0 => restart ESP
+
+}
+
+//Interrupcion ADS. DataReady
+void IRAM_ATTR dataReadyADS(){
+  dataReady = true;
 }
 
 void setup() {
@@ -153,24 +184,25 @@ void setup() {
   adc.sendCommand(ADS119X_CMD_RDATAC);
 
   initEspNow();
+  
+  attachInterrupt(digitalPinToInterrupt(dataReady_Pin),dataReadyADS,FALLING);
 
   Serial.println("\n===== SISTEMA LISTO =====\n");
 }
 
 void loop() {
 
-  if (state) { 
-    dataReady = adc.isDRDY();
-    if (!prev_dataReady && dataReady) {
-      //elapsed = micros() - elapsed;
-      //elapsed = micros();
-      adc.readChannelData();
-      printData();  
-    }
-    prev_dataReady = dataReady;
+  if(dataReady){
+
+    dataReady = false; //Cambio estado provocado por la interrupcion
+    adc.readChannelData();
+    printData();    
+
   }
+
   if (flagReset){
     delay(100);
     ESP.restart();    
   }
+
 }
