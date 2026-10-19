@@ -50,6 +50,10 @@ byte numberOfChannels = N_CHNLS;
 bool flagReset=false;
 uint16_t contador_ceros_brutos=0;
 
+/*
+Para cada x muestras se toma la fila idx del momento e itera las columnas.
+Como resultado obtenemos una fila ix con todas sus columnas cada x muestras
+*/
 void serialPrintPaquetes (uint8_t filaVariable, int cadaXmuestras){
 
   static int cnt = 0;
@@ -74,6 +78,7 @@ void serialPrintPaquetes (uint8_t filaVariable, int cadaXmuestras){
 void printData() {
   bool todoCero=true;
   int cadaXmuestras = 5;
+  
   for(int ch=0;ch<N_CHNLS;ch++){
     int16_t v=adc.getChannelData(ch);
     pkt.data[idx][ch]=v;//Lo guardo al paquete de envío
