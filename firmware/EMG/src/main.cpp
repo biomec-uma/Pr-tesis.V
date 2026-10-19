@@ -63,7 +63,7 @@ void serialPrintPaquetes (uint8_t filaVariable, int cadaXmuestras){
     for(int i=0; i<N_CHNLS; i++){
 
       if(i>0){
-      Serial.print('\t'); 
+        Serial.print('\t'); 
       } 
       Serial.print(pkt.data[filaVariable][i]);
     }
