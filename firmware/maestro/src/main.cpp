@@ -58,12 +58,12 @@ void imprimePaquete(packet paquete){
   for(int i=0; i<BATCH; i++){
 
     for(int j=0; j<N_CHNLS; j++){
-
-      Serial.print(paquete.data[i][j]);
       if(j>0){
         Serial.print('\t'); 
       }
+      Serial.print(paquete.data[i][j]);
     }
+    Serial.println();
   }
 }
 
@@ -84,8 +84,6 @@ void loop(){
     newPacket = false;
     interrupts(); //Recibido, reactivar interrupciones
     imprimePaquete(packetToProcess);
-  }
-
-  
+  }  
 
 }
