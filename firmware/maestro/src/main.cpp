@@ -1,5 +1,6 @@
 #include <WiFi.h>
 #include <esp_now.h>
+#include <Adafruit_NeoPixel.h>
 
 #define BATCH 20 //Agrupar 20 muestras (1 muestra/2ms ~ 40ms)
 #define N_CHNLS 2 //Cambiamos al numero de canales que necesitemos
@@ -15,6 +16,28 @@ packet receivedPacket;
 volatile bool newPacket = false;
 volatile uint16_t packetCount = 0;
 volatile uint16_t invalidPackets = 0;
+//Variables LED C6
+#define LED_PIN 8
+#define NUM_LEDS 1
+
+Adafruit_NeoPixel led(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
+
+void initLED(){
+  led.begin();
+  led.setBrightness(150);
+  led.clear();
+  led.show();
+}
+
+void ledRojo(){
+  led.setPixelColor(0, led.Color(0,255,0));
+  led.show();
+}
+
+void ledAzul(){
+  led.setPixelColor(0, led.Color(0,0,255));
+  led.show();
+}
 
 void onDataReceived(const esp_now_recv_info_t *info, const uint8_t *incomingData, int len){
 
@@ -71,6 +94,7 @@ void setup(){
   Serial.begin(115200);
   delay(1000); //espera a que ESP y puerto serie se inicialicen
   initEspNow();
+  initLED();
 }
 
 void loop(){
@@ -79,11 +103,12 @@ void loop(){
   static int columna = 0;
 
   if(newPacket){ //Recibimos y lo procesamos
+    ledAzul();
     noInterrupts(); //Desabilita interrupciones
     packet packetToProcess = receivedPacket;
     newPacket = false;
     interrupts(); //Recibido, reactivar interrupciones
-    imprimePaquete(packetToProcess);
-  }  
-
+    imprimePaquete(packetToProcess);    
+  }
+  
 }
