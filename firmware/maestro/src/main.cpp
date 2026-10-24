@@ -53,6 +53,7 @@ void initEspNow(){
 
 }
 
+/*
 void imprimePaquete(packet paquete){
 
   for(int i=0; i<BATCH; i++){
@@ -66,6 +67,7 @@ void imprimePaquete(packet paquete){
     Serial.println();
   }
 }
+*/
 
 void setup(){
   Serial.begin(115200);
@@ -83,7 +85,6 @@ void loop(){
     packet packetToProcess = receivedPacket;
     newPacket = false;
     interrupts(); //Recibido, reactivar interrupciones
-    imprimePaquete(packetToProcess);
+    //imprimePaquete(packetToProcess); NO QQUIERO IMPRIMIR POR EL SERIAL EL PAQUETE, DESCOMPRIMIR EN LA APP PARA NO "TENER MUY OCUPADO EL ESP"
   }  
-
 }
