@@ -54,6 +54,7 @@ uint16_t contador_ceros_brutos=0;
 Para cada x muestras se toma la fila idx del momento e itera las columnas.
 Como resultado obtenemos una fila ix con todas sus columnas cada x muestras
 */
+/*
 void serialPrintPaquetes (uint8_t filaVariable, int cadaXmuestras){
 
   static int cnt = 0;
@@ -67,13 +68,11 @@ void serialPrintPaquetes (uint8_t filaVariable, int cadaXmuestras){
       } 
       Serial.print(pkt.data[filaVariable][i]);
     }
-    
     Serial.println();
     cnt = 0;
-
   }
-
 }
+*/
 
 void printData() {
   bool todoCero=true;
@@ -87,7 +86,7 @@ void printData() {
     }
   }
   
-  serialPrintPaquetes(idx, cadaXmuestras);
+  //serialPrintPaquetes(idx, cadaXmuestras); //Se descomenta para comprobar la salida de señal
 
   if(++idx==BATCH){//Cuando tenga 20 muestras pero siempre incrementa antes de evaluar
     pkt.seq=seq++; //Enumeración de dato para verla en orden
