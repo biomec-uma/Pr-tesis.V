@@ -77,7 +77,7 @@ void serialPrintPaquetes (uint8_t filaVariable, int cadaXmuestras){
 
 void printData() {
   bool todoCero=true;
-  int cadaXmuestras = 5;
+  int cadaXmuestras = 1;
   
   for(int ch=0;ch<N_CHNLS;ch++){
     int16_t v=adc.getChannelData(ch);
