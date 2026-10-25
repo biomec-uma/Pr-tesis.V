@@ -1,0 +1,2 @@
+muestra,nMuestras,duracion_s,p50_ch0,p50_ch1,p50notch_ch0,p50notch_ch1,rmsReposo_ch0_uV,rmsReposo_ch1_uV,umbral_ch0_uV,umbral_ch1_uV,tRMS_s
+23.10.2026.antebrazoluegobicep.motoresypulsacionemg.csv,5000,10,42.4196287532534,86.7757028872686,0.705835013985658,5.24779440606556,125.132591549235,34.4903788939728,813.774903018424,225.13468654072,0.2
