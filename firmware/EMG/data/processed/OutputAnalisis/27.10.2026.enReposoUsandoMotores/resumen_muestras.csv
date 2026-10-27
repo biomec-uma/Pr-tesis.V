@@ -1,0 +1,2 @@
+muestra,nMuestras,duracion_s,p50_ch0,p50_ch1,p50notch_ch0,p50notch_ch1,rmsReposo_ch0_uV,rmsReposo_ch1_uV,umbral_ch0_uV,umbral_ch1_uV,sps,notchOn,f0_Hz,Q,bandaOn,fBaja_Hz,fAlta_Hz,tRMS_s,tReposoIni_s,tReposoFin_s,kUmbral
+27.10.2026.enReposoUsandoMotores.csv,5000,10,66.6417772918071,93.1631118707423,1.20072319764949,6.58156339619607,3.49839750321083,6.0562100314697,6.65320367331876,16.6197234895605,500,1,50,35,1,20,130,0.2,0.5,2.5,3
