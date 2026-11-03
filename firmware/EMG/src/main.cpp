@@ -3,7 +3,6 @@
 #include <WiFi.h>
 #include <esp_now.h>
 #define BATCH 20 //Agrupar 20 muestras (1 muestra/2ms ~ 40ms)
-
 #define N_CHNLS 2 //Cambiamos al numero de canales que necesitemos
 
 typedef struct __attribute__((packed)){//__attribute__ es para no meter relleno cuando halla espacios, en este caso no lo haría porque el tamaño es el justo
@@ -11,11 +10,12 @@ typedef struct __attribute__((packed)){//__attribute__ es para no meter relleno 
   int16_t data[BATCH][N_CHNLS];
 } Packet;
 
-uint8_t rxMac[]={0xAC,0xEB,0xE6,0x2C,0xD7,0xDC}; //RECEPTOR C6
+uint8_t rxMac[]={0xAC,0xEB,0xE6,0x00,0x55,0xB4}; //RECEPTOR C6
 Packet pkt;
 uint8_t idx=0;
 uint16_t seq=0;
 volatile uint16_t sendFails=0;
+
 
 void onSent(const wifi_tx_info_t *info, esp_now_send_status_t s) {
   if (s != ESP_NOW_SEND_SUCCESS) sendFails++;
@@ -31,8 +31,8 @@ void initEspNow() {
   esp_now_add_peer(&peer);
 }
 
-
-// Pins para el ads 
+//=================Variables del ADS===============
+//Pins para el ads 
 byte dataReady_Pin = 1;
 byte reset_pin = 0;
 byte cs_pin = 10 ; 
@@ -41,14 +41,20 @@ byte miso_pin = 2;
 byte mosi_pin = 7;
 byte start_pin = 3;
 ADS119X adc(dataReady_Pin,reset_pin , cs_pin, clk_pin, miso_pin, mosi_pin);
-
-
-//Variables del ADS
+//Variables del ADS para utilidades
 bool dataReady = false;
-bool prev_dataReady = false;
-byte numberOfChannels = N_CHNLS;
 bool flagReset=false;
 uint16_t contador_ceros_brutos=0;
+//Variables del ADS para hacer test
+bool testADS = false;
+const byte testModeRuidoInterno = 0x00;
+const byte testModeSignalCuadrada = 0x01;
+const byte testModeSignalDC = 0x02;
+//Variables del ADS para configuracion
+const byte N_CHNLS_TOTALES = 0x08;
+const byte adsGanancia = ADS119X_CHnSET_GAIN_4;
+const byte adsSPS = ADS119X_DRATE_500SPS;
+//=================================================
 
 /*
 Para cada x muestras se toma la fila idx del momento e itera las columnas.
@@ -104,14 +110,20 @@ void printData() {
 
 }
 
+//=================INTERRUPCIONES==========================
+
 //Interrupcion ADS. DataReady
 void IRAM_ATTR dataReadyADS(){
   dataReady = true;
 }
 
-void setup() {
-  
-  Serial.begin(115200);  
+//=========================================================
+
+/*Esta funcion prepara el ADS respetando orden y tiempos especificados en el datasheet.
+Deber ser siempre la primera en iniciarse. 
+Tras llamar a esta funcion debe llamarse posteriormente a configurarADS()
+*/
+void prepararADS(){
   // INICIO DE ADS1198------------------------------------------------------------------
   // 0. Necesario poner entradas del ADS a 0 por hardware.-------------
   // Estado seguro de lineas de control antes de adc.begin()
@@ -147,7 +159,6 @@ void setup() {
     Serial.printf("Intento de conexión ADS1198: %d de %d...\n", intentos + 1, maxIntentos);
     if (adc.begin()) {
       conectado = true;
-      numberOfChannels = adc.getNumberOfChannels();
       Serial.println("¡ADS1198 Conectado con éxito!");
     }else{
       intentos++;
@@ -160,38 +171,62 @@ void setup() {
     Serial.println("Fallo crítico: No se pudo conectar con el ADS. Reiniciando microcontrolador...");
     delay(2000); 
     ESP.restart(); 
-  }
-  //--------------------------------------------------------------------
+  }  
 
+}
+
+/*Esta funcion debe ejecutarse siempre despues de prepararADS()*/
+void configurarADS(){
+  
   // Stop continuous conversion, and send commands to configure 
   adc.sendCommand (ADS119X_CMD_SDATAC);
   
   // ========== CAMBIO CRÍTICO 1: GANANCIA REDUCIDA ==========
   // En 4.1 funciona bien, en 4.2 se satura. Usamos la de 4.1
-  adc.setAllChannelGain( ADS119X_CHnSET_GAIN_4);  //
-  
+  adc.setAllChannelGain(adsGanancia);
   adc.setAllChannelMux(ADS119X_CHnSET_MUX_NORMAL); //Este método activa todos los canales
-  
 
-    //Desactivo canales que no voy a usar -----------------------------------------------
-  for (byte address = ADS119X_ADD_CH3SET; address <= ADS119X_ADD_CH8SET; address++) {
-    adc.setChannelSettings(address, ADS119X_CHnSET_PD_NORMAL, ADS119X_CHnSET_GAIN_1, ADS119X_CHnSET_MUX_IN_SHORT);
-  }
-  for (byte address = ADS119X_ADD_CH3SET; address <= ADS119X_ADD_CH8SET; address++) {
+  for (byte address=ADS119X_ADD_CH1SET+N_CHNLS; address<ADS119X_ADD_CH1SET+N_CHNLS_TOTALES; address++){
+    adc.setChannelSettings(address, ADS119X_CHnSET_PD_NORMAL, ADS119X_CHnSET_GAIN_1, ADS119X_CHnSET_MUX_IN_SHORT);    
     adc.setChannelSettings(address, ADS119X_CHnSET_PD_POWERDOWN, ADS119X_CHnSET_GAIN_1, ADS119X_CHnSET_MUX_IN_SHORT);
   }
   //--------------------------------------------------------------------
-
-  //--------------------------------------------------------------------
-  
-  adc.setDataRate(ADS119X_DRATE_500SPS);     
+  adc.setDataRate(adsSPS);
   adc.sendCommand(ADS119X_CMD_START);
-  adc.sendCommand(ADS119X_CMD_RDATAC);
+  adc.sendCommand(ADS119X_CMD_RDATAC);  
 
-  initEspNow();
+}
+
+/*Esta funcion decide si los datos que imprime printData() son muestras EMG o señales de prueba.
+testear: Define si se hace el test o no
+modo: Define que tipo de test quiere hacerse
+Si testear = false la funcion no hace nada*/
+void testearADS(bool testear, byte modo){
+  if (testear){
+    switch (modo){
+      case testModeRuidoInterno:
+      adc.testNoise();
+      break;
+      
+      case testModeSignalCuadrada:
+      adc.testSignal();
+      break;
+
+      case testModeSignalDC:
+      adc.testSignalDC();
+      break;
+    }
+  }
+}
+
+void setup() {
   
+  Serial.begin(115200);
+  prepararADS();
+  configurarADS();
+  testearADS(testADS,testModeSignalCuadrada);
+  initEspNow();
   attachInterrupt(digitalPinToInterrupt(dataReady_Pin),dataReadyADS,FALLING);
-
   Serial.println("\n===== SISTEMA LISTO =====\n");
 }
 
