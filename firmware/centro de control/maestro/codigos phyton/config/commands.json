@@ -1,0 +1,123 @@
+{
+  "_info": "Catálogo de comandos. Para añadir uno basta con añadir un bloque a 'commands' (y su handler en firmware/mano/mano.ino). 'target': 'mano' se reenvía por ESP-NOW; 'puente' lo procesa la C6 del PC (se envía con prefijo @). 'args': lista de argumentos con tipo int|float|text, rango opcional (min/max) u opciones fijas (choices).",
+  "commands": [
+    {
+      "name": "GESTO",
+      "category": "Gestos",
+      "target": "mano",
+      "description": "Lleva la mano a un gesto: 1 Abrir todos, 2 Paz, 3 Rock, 4 jeje, 5 PiumPium, 6 Adan, 7 Austriaco, 8 Heterobasico. Pasa a modo MANUAL.",
+      "args": [
+        {"name": "numero", "type": "int", "min": 1, "max": 8}
+      ]
+    },
+    {
+      "name": "ABRIR",
+      "category": "Gestos",
+      "target": "mano",
+      "description": "Abre todos los dedos y pone el pulgar a 10° (igual que GESTO 1).",
+      "args": []
+    },
+    {
+      "name": "CERRAR",
+      "category": "Gestos",
+      "target": "mano",
+      "description": "Cierra todos los dedos y pone el pulgar a 10° (igual que GESTO 8).",
+      "args": []
+    },
+    {
+      "name": "GESTOS",
+      "category": "Gestos",
+      "target": "mano",
+      "description": "La mano responde con la lista de gestos que tiene programados.",
+      "args": []
+    },
+    {
+      "name": "DEDO",
+      "category": "Dedos",
+      "target": "mano",
+      "description": "Abre o cierra un solo dedo; los demás no se mueven.",
+      "args": [
+        {"name": "dedo", "type": "text", "choices": ["INDICE", "MEDIO", "ANULAR"]},
+        {"name": "accion", "type": "text", "choices": ["ABRIR", "CERRAR"]}
+      ]
+    },
+    {
+      "name": "PULGAR",
+      "category": "Dedos",
+      "target": "mano",
+      "description": "Mueve el servo del pulgar al ángulo indicado (10 = abierto, 90 = cruzado).",
+      "args": [
+        {"name": "angulo", "type": "int", "min": 0, "max": 180}
+      ]
+    },
+    {
+      "name": "PARAR",
+      "category": "Control",
+      "target": "mano",
+      "description": "Frena todos los motores con rampa y pasa a modo MANUAL.",
+      "args": []
+    },
+    {
+      "name": "AUTO",
+      "category": "Control",
+      "target": "mano",
+      "description": "Modo demo: recorre los 8 gestos automáticamente (como el código original).",
+      "args": []
+    },
+    {
+      "name": "MANUAL",
+      "category": "Control",
+      "target": "mano",
+      "description": "Detiene la demo; la mano solo obedece comandos.",
+      "args": []
+    },
+    {
+      "name": "TIEMPO",
+      "category": "Control",
+      "target": "mano",
+      "description": "Tiempo que se activan los motores en cada movimiento (y pausa de la demo), en ms. Por defecto 3000.",
+      "args": [
+        {"name": "ms", "type": "int", "min": 500, "max": 10000}
+      ]
+    },
+    {
+      "name": "STREAM",
+      "category": "Telemetría",
+      "target": "mano",
+      "description": "Activa (1) o desactiva (0) el envío de telemetría: PWM de cada dedo (+ abre / − cierra), ángulo del pulgar y gesto.",
+      "args": [
+        {"name": "estado", "type": "int", "min": 0, "max": 1}
+      ]
+    },
+    {
+      "name": "PERIODO",
+      "category": "Telemetría",
+      "target": "mano",
+      "description": "Periodo de envío de telemetría en milisegundos.",
+      "args": [
+        {"name": "ms", "type": "int", "min": 10, "max": 5000}
+      ]
+    },
+    {
+      "name": "ESTADO",
+      "category": "Diagnóstico",
+      "target": "mano",
+      "description": "La mano responde con su modo, gesto, posición de cada dedo y ángulo del pulgar.",
+      "args": []
+    },
+    {
+      "name": "PING",
+      "category": "Diagnóstico",
+      "target": "puente",
+      "description": "Comprueba que la C6 puente responde por USB.",
+      "args": []
+    },
+    {
+      "name": "INFO",
+      "category": "Diagnóstico",
+      "target": "puente",
+      "description": "El puente muestra su MAC, canal y la MAC de la mano configurada.",
+      "args": []
+    }
+  ]
+}
