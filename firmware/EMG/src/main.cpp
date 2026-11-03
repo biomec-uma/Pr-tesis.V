@@ -10,7 +10,7 @@ typedef struct __attribute__((packed)){//__attribute__ es para no meter relleno 
   int16_t data[BATCH][N_CHNLS];
 } Packet;
 
-uint8_t rxMac[]={0xAC,0xEB,0xE6,0x2C,0xD7,0xDC}; //RECEPTOR C6
+uint8_t rxMac[]={0xAC,0xEB,0xE6,0x00,0x55,0xB4}; //RECEPTOR C6
 Packet pkt;
 uint8_t idx=0;
 uint16_t seq=0;
@@ -117,6 +117,8 @@ void IRAM_ATTR dataReadyADS(){
   dataReady = true;
 }
 
+//=========================================================
+
 /*Esta funcion prepara el ADS respetando orden y tiempos especificados en el datasheet.
 Deber ser siempre la primera en iniciarse. 
 Tras llamar a esta funcion debe llamarse posteriormente a configurarADS()
@@ -222,7 +224,7 @@ void setup() {
   Serial.begin(115200);
   prepararADS();
   configurarADS();
-  testearADS(testADS,testModeRuidoInterno);
+  testearADS(testADS,testModeSignalCuadrada);
   initEspNow();
   attachInterrupt(digitalPinToInterrupt(dataReady_Pin),dataReadyADS,FALLING);
   Serial.println("\n===== SISTEMA LISTO =====\n");
