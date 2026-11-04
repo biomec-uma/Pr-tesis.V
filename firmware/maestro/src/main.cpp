@@ -84,6 +84,8 @@ void imprimePaquete(packet paquete){
       if(j>0){
         Serial.print('\t'); 
       }
+      Serial.print(paquete.seq);
+      Serial.print('\t');
       Serial.print(paquete.data[i][j]);
     }
     Serial.println();
