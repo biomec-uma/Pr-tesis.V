@@ -54,6 +54,16 @@ const byte testModeSignalDC = 0x02;
 const byte N_CHNLS_TOTALES = 0x08;
 const byte adsGanancia = ADS119X_CHnSET_GAIN_4;
 const byte adsSPS = ADS119X_DRATE_500SPS;
+//Preconfiguraciones para registros
+/*Pre-conf registro CONFIG3 para RLD 0xCC = 1100 1100
+Activa unicamente la referencia interna y ref interna del AO RLD
+*/
+byte preconfRLDConfig3 = 0xCC;
+/*Pre-conf registro RLD_SENSP y RLD_SENSN 
+El circuito RLD escucha el ruido de los electrodos de los canales CH1 y CH2
+*/
+byte preconfSENSPCH1yCH2 = 0x03;
+byte preconfSENSNCH1yCH2 = 0x03;
 //=================================================
 
 /*
@@ -219,15 +229,78 @@ void testearADS(bool testear, byte modo){
   }
 }
 
+/*Esta funcion usa adc.getRegister(address) para obtener el estado de un registro
+La entrada es una direccion de un registro determinado.
+Imprime el registro en Hexadecimal
+*/
+void imprimirRegistros(){
+  int cnt = 1;
+
+  //Imprime Registro CHTSET
+  for(byte address = ADS119X_ADD_CH1SET;address<=ADS119X_ADD_CH8SET; address++){
+    Serial.print("CH");Serial.print(cnt);Serial.print("SET:");
+    Serial.println(adc.getRegister(address),HEX);
+    cnt++;
+  }
+
+  cnt = 1;
+  //Imprime Registro CONFIG1-3
+  for(byte address = ADS119X_ADD_CONFIG1;address<=ADS119X_ADD_CONFIG3; address++){
+    Serial.print("CONFIG");Serial.print(cnt);Serial.print(":");
+    Serial.println(adc.getRegister(address),HEX);
+    cnt++;
+  }
+
+  //Imprime Registro CONFIG 4
+  Serial.print("CONFIG");Serial.print(cnt);Serial.print(":");
+  Serial.println(adc.getRegister(ADS119X_ADD_CONFIG4),HEX);
+
+  //Imprime Registro RLD SENSP y SENSN
+  Serial.print("RLD SENSP");Serial.print(":");
+  Serial.println(adc.getRegister(ADS119X_ADD_RLD_SENSP),HEX);
+  Serial.print("RLD SENSN");Serial.print(":");
+  Serial.println(adc.getRegister(ADS119X_ADD_RLD_SENSN),HEX);
+
+  //Imprime Registro LOFF SENSP y SENSN
+  Serial.print("LOFF SENSP");Serial.print(":");
+  Serial.println(adc.getRegister(ADS119X_ADD_LOFF_SENSP),HEX);
+  Serial.print("LOFF SENSN");Serial.print(":");
+  Serial.println(adc.getRegister(ADS119X_ADD_LOFF_SENSN),HEX);
+
+  //Imprime Registro de estado LOFF STATP y STATN
+  Serial.print("LOFF STATP");Serial.print(":");
+  Serial.println(adc.getRegister(ADS119X_ADD_LOFF_STATP),HEX);
+  Serial.print("LOFF STATN");Serial.print(":");
+  Serial.println(adc.getRegister(ADS119X_ADD_LOFF_STATN),HEX);
+}
+
+/*Esta funcion configura activa el amplificador RLD, activa la referencia interna y
+establece los canales usados como escucha para tomar el ruido y devolverlo por referencia
+*/
+void configurarRLD(){
+
+  adc.sendCommand(ADS119X_CMD_SDATAC); //Primero siempre detener la lectura
+  adc.WREG(ADS119X_ADD_CONFIG3,preconfRLDConfig3);
+  adc.WREG(ADS119X_ADD_RLD_SENSP,preconfSENSPCH1yCH2);
+  adc.WREG(ADS119X_ADD_RLD_SENSN,preconfSENSNCH1yCH2);
+  adc.sendCommand(ADS119X_CMD_START); //Siempre continuar conversiones
+  adc.sendCommand(ADS119X_CMD_RDATAC); //Siempre leer conversiones
+
+}
+
 void setup() {
   
   Serial.begin(115200);
   prepararADS();
   configurarADS();
-  testearADS(testADS,testModeSignalCuadrada);
+  configurarRLD();
+  testearADS(testADS,testModeSignalCuadrada); //Si testADS = true no se obtienen muestras EMG
   initEspNow();
   attachInterrupt(digitalPinToInterrupt(dataReady_Pin),dataReadyADS,FALLING);
-  Serial.println("\n===== SISTEMA LISTO =====\n");
+  Serial.println("===== SISTEMA LISTO =====");
+  Serial.print("==========Registros============");
+  imprimirRegistros();
+
 }
 
 void loop() {
