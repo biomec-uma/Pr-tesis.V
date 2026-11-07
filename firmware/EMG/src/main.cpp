@@ -2,18 +2,22 @@
 #include <BIOMEC_ADS119X.h>
 #include <WiFi.h>
 #include <esp_now.h>
-#define BATCH 20 //Agrupar 20 muestras (1 muestra/2ms ~ 40ms)
+#define BATCH 10 //Agrupar 10 muestras (1 muestra/2ms ~ 20ms)
 #define N_CHNLS 2 //Cambiamos al numero de canales que necesitemos
 
 typedef struct __attribute__((packed)){//__attribute__ es para no meter relleno cuando halla espacios, en este caso no lo haría porque el tamaño es el justo
-  uint16_t seq;
+  uint8_t version; //Formato (nos puede ayudar en el futuro)
+  uint8_t nChnls; //Nº de canales
+  uint8_t batch; //Nº de muestras por paquete
+  uint16_t sendFails;//Nº de envios fallidos
+  uint32_t seq; //El numero de paquete
   int16_t data[BATCH][N_CHNLS];
 } Packet;
-
-uint8_t rxMac[]={0xAC,0xEB,0xE6,0x00,0x55,0xB4}; //RECEPTOR C6
+static_assert(sizeof(Packet) <= 250, "El paquete excede la capacidad, reducir BATCH o N_CHNLS");
+uint8_t rxMac[]={0xAC,0xEB,0xE6,0x2C,0xD7,0xDC}; //RECEPTOR C6
 Packet pkt;
 uint8_t idx=0;
-uint16_t seq=0;
+uint32_t seq=0;
 volatile uint16_t sendFails=0;
 
 
@@ -42,7 +46,7 @@ byte mosi_pin = 7;
 byte start_pin = 3;
 ADS119X adc(dataReady_Pin,reset_pin , cs_pin, clk_pin, miso_pin, mosi_pin);
 //Variables del ADS para utilidades
-bool dataReady = false;
+volatile bool dataReady = false;
 bool flagReset=false;
 uint16_t contador_ceros_brutos=0;
 //Variables del ADS para hacer test
@@ -60,24 +64,6 @@ const byte adsSPS = ADS119X_DRATE_500SPS;
 Para cada x muestras se toma la fila idx del momento e itera las columnas.
 Como resultado obtenemos una fila ix con todas sus columnas cada x muestras
 */
-void serialPrintPaquetes(uint8_t filaVariable, int cadaXmuestras){
-  static int cnt = 0;
-  cnt++;
-
-  if (cnt >= cadaXmuestras){
-    Serial.print(seq);            // nº del paquete que se está llenando
-    Serial.print('\t');
-    Serial.print(filaVariable);   // posición dentro del paquete (0..BATCH-1)
-
-    for(int i = 0; i < N_CHNLS; i++){
-      Serial.print('\t');
-      Serial.print(pkt.data[filaVariable][i]);
-    }
-    Serial.println();
-    cnt = 0;
-  }
-}
-
 void printData() {
   bool todoCero=true;
   int cadaXmuestras = 1;
@@ -90,10 +76,9 @@ void printData() {
     }
   }
   
-  serialPrintPaquetes(idx, cadaXmuestras);
-
   if(++idx==BATCH){//Cuando tenga 20 muestras pero siempre incrementa antes de evaluar
     pkt.seq=seq++; //Enumeración de dato para verla en orden
+    pkt.sendFails=sendFails; //Nº de envios fallidos
     esp_now_send(rxMac, (uint8_t*)&pkt, sizeof(pkt));
     idx=0;//Vacio contador
   }
@@ -104,7 +89,6 @@ void printData() {
     contador_ceros_brutos = 0;
   }
   if(contador_ceros_brutos > 750) flagReset = true; //Solo se reciben 0 => restart ESP
-
 }
 
 //=================INTERRUPCIONES==========================
@@ -222,6 +206,9 @@ void setup() {
   prepararADS();
   configurarADS();
   testearADS(testADS,testModeSignalCuadrada);
+  pkt.version=1;
+  pkt.nChnls=N_CHNLS; 
+  pkt.batch=BATCH;
   initEspNow();
   attachInterrupt(digitalPinToInterrupt(dataReady_Pin),dataReadyADS,FALLING);
   Serial.println("\n===== SISTEMA LISTO =====\n");
