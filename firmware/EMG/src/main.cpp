@@ -60,30 +60,27 @@ const byte adsSPS = ADS119X_DRATE_500SPS;
 Para cada x muestras se toma la fila idx del momento e itera las columnas.
 Como resultado obtenemos una fila ix con todas sus columnas cada x muestras
 */
-void serialPrintPaquetes (uint8_t filaVariable, int cadaXmuestras){
-
+void serialPrintPaquetes(uint8_t filaVariable, int cadaXmuestras){
   static int cnt = 0;
   cnt++;
 
-  if (cnt == cadaXmuestras){
-    for(int i=0; i<N_CHNLS; i++){
+  if (cnt >= cadaXmuestras){
+    Serial.print(seq);            // nº del paquete que se está llenando
+    Serial.print('\t');
+    Serial.print(filaVariable);   // posición dentro del paquete (0..BATCH-1)
 
-      if(i>0){
-        Serial.print('\t'); 
-      } 
+    for(int i = 0; i < N_CHNLS; i++){
+      Serial.print('\t');
       Serial.print(pkt.data[filaVariable][i]);
     }
-    
     Serial.println();
     cnt = 0;
-
   }
-
 }
 
 void printData() {
   bool todoCero=true;
-  int cadaXmuestras = 5;
+  int cadaXmuestras = 1;
   
   for(int ch=0;ch<N_CHNLS;ch++){
     int16_t v=adc.getChannelData(ch);
