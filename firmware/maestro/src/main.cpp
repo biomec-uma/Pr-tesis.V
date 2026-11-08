@@ -75,9 +75,7 @@ void llamarTrasRecibirPaquete(esp_now_recv_cb_t funcion){
 }
 
 void initEspNow(){
-
   WiFi.mode(WIFI_STA);
-
   comprobarEspNow();
   llamarTrasRecibirPaquete(onDataReceived);
 }
