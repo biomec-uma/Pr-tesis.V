@@ -5,7 +5,7 @@
       "name": "GESTO",
       "category": "Gestos",
       "target": "mano",
-      "description": "Lleva la mano a un gesto: 1 Abrir todos, 2 Paz, 3 Rock, 4 jeje, 5 PiumPium, 6 Adan, 7 Austriaco, 8 Heterobasico. Pasa a modo MANUAL.",
+      "description": "Lleva la mano a un gesto: 1 Mano abierta, 2 Índice y medio, 3 Índice y anular, 4 Medio extendido, 5 Índice extendido, 6 Señalar, 7 Mano plana, 8 Gancho. Pasa a modo MANUAL.",
       "args": [
         {"name": "numero", "type": "int", "min": 1, "max": 8}
       ]
@@ -30,6 +30,18 @@
       "target": "mano",
       "description": "La mano responde con la lista de gestos que tiene programados.",
       "args": []
+    },
+    {
+      "name": "POSTURA",
+      "category": "Gestos",
+      "target": "mano",
+      "description": "Mueve todos los dedos a la vez (índice, medio, anular): A = abierto, C = cerrado, - = no se mueve; y pone el pulgar al ángulo indicado. Ej.: POSTURA C A C 90. Lo usan las posturas personalizadas de la app.",
+      "args": [
+        {"name": "indice", "type": "text", "choices": ["A", "C", "-"]},
+        {"name": "medio", "type": "text", "choices": ["A", "C", "-"]},
+        {"name": "anular", "type": "text", "choices": ["A", "C", "-"]},
+        {"name": "pulgar", "type": "int", "min": 0, "max": 180}
+      ]
     },
     {
       "name": "DEDO",
@@ -116,8 +128,17 @@
       "name": "INFO",
       "category": "Diagnóstico",
       "target": "puente",
-      "description": "El puente muestra su MAC, canal y la MAC de la mano configurada.",
+      "description": "El puente muestra su MAC, canal, la MAC de la mano configurada y los paquetes EMG recibidos y perdidos.",
       "args": []
+    },
+    {
+      "name": "EMG",
+      "category": "EMG",
+      "target": "puente",
+      "description": "Activa (1) o desactiva (0) el reenvío a la app de las señales EMG de la placa del ADS1198. Lo activa y desactiva la pestaña Entrenamiento.",
+      "args": [
+        {"name": "estado", "type": "int", "min": 0, "max": 1}
+      ]
     }
   ]
 }

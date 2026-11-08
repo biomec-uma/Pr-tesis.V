@@ -7,11 +7,17 @@ diferencia. En el selector de puerto aparece como "SIMULADOR".
 La lógica es una copia de firmware/mano/mano.ino (gestos, rampas, fases,
 modo AUTO/MANUAL) y responde con los mismos textos. ¡Si cambias el firmware
 de la mano, actualiza también este archivo para que sigan coincidiendo!
+
+También imita la placa EMG: con @EMG 1 envía líneas "EMG ..." generadas por
+el paciente virtual (core/emg_sim.py), igual que haría el puente real.
 """
 
 import threading
 import time
-from dataclasses import dataclass
+
+from .emg_sim import PATIENT
+from .gestures import ABIERTO, CERRADO, DESCONOCIDO, GESTOS
+from .protocol import format_emg
 
 SIMULATOR_PORT = "SIMULADOR"
 
@@ -21,33 +27,16 @@ DURACION_RAMPA = 500      # ms
 TIEMPO_FASE = 3000        # ms (antes: timer de 3 s)
 ARRANCAR_EN_AUTO = True
 
-ABIERTO, CERRADO, DESCONOCIDO = "abierto", "cerrado", "?"
 QUIETO, ABRIENDO, CERRANDO = 0, 1, -1
 MOVIENDO, PARANDO = "moviendo", "parado"
 
 DEDOS = ["INDICE", "MEDIO", "ANULAR"]
-
-
-@dataclass(frozen=True)
-class Gesto:
-    nombre: str
-    indice: str
-    medio: str
-    anular: str
-    pulgar: int
-
-
-GESTOS = [
-    Gesto("Abrir todos",  ABIERTO, ABIERTO, ABIERTO, 10),
-    Gesto("Paz",          ABIERTO, ABIERTO, CERRADO, 10),
-    Gesto("Rock",         ABIERTO, CERRADO, ABIERTO, 10),
-    Gesto("jeje",         CERRADO, ABIERTO, CERRADO, 10),
-    Gesto("PiumPium",     ABIERTO, CERRADO, CERRADO, 10),
-    Gesto("Adan",         ABIERTO, CERRADO, CERRADO, 90),
-    Gesto("Austriaco",    ABIERTO, ABIERTO, ABIERTO, 90),
-    Gesto("Heterobasico", CERRADO, CERRADO, CERRADO, 10),
-]
 N = len(GESTOS)
+LETRAS = {"A": ABIERTO, "C": CERRADO, "-": DESCONOCIDO}
+
+# EMG simulado (lo que reenviaría el puente desde la placa del ADS1198)
+EMG_FS = 500        # muestras/s
+EMG_BATCH = 20      # muestras por paquete, como BATCH en firmware/EMG
 
 
 def _map(x, in_min, in_max, out_min, out_max) -> int:
@@ -78,7 +67,7 @@ class SimulatedHand:
             "DEDO": self.cmd_dedo, "PULGAR": self.cmd_pulgar, "PARAR": self.cmd_parar,
             "AUTO": self.cmd_auto, "MANUAL": self.cmd_manual, "TIEMPO": self.cmd_tiempo,
             "STREAM": self.cmd_stream, "PERIODO": self.cmd_periodo, "ESTADO": self.cmd_estado,
-            "GESTOS": self.cmd_gestos,
+            "GESTOS": self.cmd_gestos, "POSTURA": self.cmd_postura,
         }
         self.ir_a_gesto(0)  # empieza abriendo la mano, como el firmware
 
@@ -213,6 +202,22 @@ class SimulatedHand:
         self.angulo_pulgar = ang
         return [f"ACK PULGAR {ang}"]
 
+    def cmd_postura(self, args):
+        # Igual que cmdPostura() de mano.ino
+        ang = self._int(args, 3, -1) if len(args) == 4 and args[3][:1].isdigit() else -1
+        objs = [LETRAS.get(a.upper()) for a in args[:3]]
+        if len(args) != 4 or None in objs or not 0 <= ang <= 180:
+            return ["ERR Uso: POSTURA <A|C|-> <A|C|-> <A|C|-> <0-180>  (indice medio anular pulgar)"]
+        self.modo_auto = False
+        self.gesto_actual = -1
+        for g, G in enumerate(GESTOS):  # si coincide con un gesto de la tabla, se informa como ese gesto
+            if [G.indice, G.medio, G.anular] == objs and G.pulgar == ang:
+                self.gesto_actual = g
+        self.angulo_pulgar = ang
+        self.mover_a(objs)
+        letras = " ".join({ABIERTO: "A", CERRADO: "C"}.get(o, "-") for o in objs)
+        return [f"ACK POSTURA {letras} {ang}"]
+
     def cmd_parar(self, _):
         self.modo_auto = False
         self._cancelar_movimiento()
@@ -248,9 +253,9 @@ class SimulatedHand:
         return [f"ACK PERIODO {ms}"]
 
     def cmd_estado(self, _):
-        gesto = GESTOS[self.gesto_actual].nombre if self.gesto_actual >= 0 else "personalizado"
+        # gesto = número (0 = personalizado), igual que mano.ino
         return [
-            f"ACK ESTADO modo={'AUTO' if self.modo_auto else 'MANUAL'} fase={self.fase} gesto={gesto} "
+            f"ACK ESTADO modo={'AUTO' if self.modo_auto else 'MANUAL'} fase={self.fase} gesto={self.gesto_actual + 1} "
             f"indice={self.pos[0]} medio={self.pos[1]} anular={self.pos[2]} "
             f"pulgar={self.angulo_pulgar} tiempo={self.tiempo_fase}"
         ]
@@ -269,6 +274,9 @@ class SimulatedSerial:
         self.timeout = timeout
         self.is_open = True
         self.hand = SimulatedHand()
+        self.emg_on = False
+        self._emg_seq = 0
+        self._emg_next = 0.0
         self._out = bytearray()
         self._in = b""
         self._lock = threading.Lock()
@@ -315,16 +323,31 @@ class SimulatedSerial:
         self.hand.update()
         for line in self.hand.telemetry():
             self._emit(line)
+        if self.emg_on:
+            now = time.monotonic()
+            if now - self._emg_next > 0.5:  # la app estuvo parada: no se recupera el atraso de golpe
+                self._emg_next = now
+            while now >= self._emg_next:
+                self._emit(format_emg(self._emg_seq & 0xFFFF, PATIENT.generate(EMG_BATCH)))
+                self._emg_seq += 1
+                self._emg_next += EMG_BATCH / EMG_FS
 
     def _handle_line(self, line: str) -> None:
         if not line:
             return
         if line.startswith("@"):  # comandos del puente
             name = line[1:].split()[0].upper() if line[1:].split() else ""
+            args = line[1:].split()[1:]
             if name == "PING":
                 self._emit("BRIDGE PONG")
             elif name == "INFO":
-                self._emit(f"BRIDGE MAC puente={self.BRIDGE_MAC} mano=FF:FF:FF:FF:FF:FF canal=1 (SIMULADO)")
+                self._emit(f"BRIDGE MAC puente={self.BRIDGE_MAC} mano=FF:FF:FF:FF:FF:FF canal=1 "
+                           f"emg={int(self.emg_on)} paquetes={self._emg_seq} perdidos=0 (SIMULADO)")
+            elif name == "EMG":
+                if args and args[0] in ("0", "1"):
+                    self.emg_on = args[0] == "1"
+                    self._emg_next = time.monotonic()
+                self._emit(f"BRIDGE EMG {int(self.emg_on)} canales={PATIENT.channels} fs={EMG_FS} (SIMULADO)")
             else:
                 self._emit(f"ERR Comando de puente desconocido: {name}")
             return

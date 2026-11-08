@@ -16,12 +16,12 @@ from .simulator import SIMULATOR_PORT, SimulatedSerial
 
 
 def available_ports() -> list[tuple[str, str]]:
-    """[(dispositivo, descripción), ...] p. ej. [('COM5', 'USB JTAG/serial debug unit')]
+    """Puertos COM reales: [(dispositivo, descripción), ...] p. ej. [('COM7', 'Dispositivo serie USB')].
 
-    Siempre incluye al final el simulador, para poder trabajar sin hardware.
+    El simulador no es un puerto: se elige con el selector "Simulación" de la barra
+    de conexión, que conecta a SIMULATOR_PORT.
     """
-    ports = [(p.device, p.description) for p in list_ports.comports()]
-    return ports + [(SIMULATOR_PORT, "Mano simulada (sin hardware)")]
+    return [(p.device, p.description) for p in list_ports.comports()]
 
 
 class SerialLink(QObject):

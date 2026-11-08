@@ -85,14 +85,15 @@ struct Gesto {
 
 // ---- TABLA DE GESTOS: añadir / quitar líneas aquí ----
 const Gesto GESTOS[] = {
-  {"Abrir todos",  ABIERTO, ABIERTO, ABIERTO, 10},  // case 0
-  {"Paz",          ABIERTO, ABIERTO, CERRADO, 10},  // case 2  (cerrar anular)
-  {"Rock",         ABIERTO, CERRADO, ABIERTO, 10},  // case 4  (abrir anular, cerrar medio)
-  {"jeje",         CERRADO, ABIERTO, CERRADO, 10},  // case 6  (cerrar indice + anular, abrir medio)
-  {"PiumPium",     ABIERTO, CERRADO, CERRADO, 10},  // case 8  (cerrar medio, abrir indice)
-  {"Adan",         ABIERTO, CERRADO, CERRADO, 90},  // case 10 (pulgar a 90)
-  {"Austriaco",    ABIERTO, ABIERTO, ABIERTO, 90},  // case 12 (abrir medio y anular)
-  {"Heterobasico", CERRADO, CERRADO, CERRADO, 10},  // case 14 (cerrar todo, pulgar a 10)
+  // Nombres según la postura o el agarre. Deben coincidir con biomec/core/gestures.py (app).
+  {"Mano abierta",     ABIERTO, ABIERTO, ABIERTO, 10},  // case 0
+  {"Índice y medio",   ABIERTO, ABIERTO, CERRADO, 10},  // case 2  (cerrar anular)
+  {"Índice y anular",  ABIERTO, CERRADO, ABIERTO, 10},  // case 4  (abrir anular, cerrar medio)
+  {"Medio extendido",  CERRADO, ABIERTO, CERRADO, 10},  // case 6  (cerrar indice + anular, abrir medio)
+  {"Índice extendido", ABIERTO, CERRADO, CERRADO, 10},  // case 8  (cerrar medio, abrir indice)
+  {"Señalar",          ABIERTO, CERRADO, CERRADO, 90},  // case 10 (pulgar a 90)
+  {"Mano plana",       ABIERTO, ABIERTO, ABIERTO, 90},  // case 12 (abrir medio y anular)
+  {"Gancho",           CERRADO, CERRADO, CERRADO, 10},  // case 14 (cerrar todo, pulgar a 10)
 };
 const int N = sizeof(GESTOS) / sizeof(GESTOS[0]);  // Número de posiciones
 
@@ -295,6 +296,41 @@ void cmdPulgar(const BiomecArgs& a) {
   reply("ACK PULGAR %ld", ang);
 }
 
+// "A" -> ABIERTO, "C" -> CERRADO, "-" -> DESCONOCIDO (= no mover ese dedo)
+bool letraPos(String s, Pos& p) {
+  s.toUpperCase();
+  if (s == "A") { p = ABIERTO; return true; }
+  if (s == "C") { p = CERRADO; return true; }
+  if (s == "-") { p = DESCONOCIDO; return true; }
+  return false;
+}
+
+char letra(Pos p) { return p == ABIERTO ? 'A' : p == CERRADO ? 'C' : '-'; }
+
+// POSTURA <indice> <medio> <anular> <pulgar>   p. ej. POSTURA C A C 90
+// Mueve todos los dedos A LA VEZ (con DEDO uno a uno, cada orden cancelaría
+// el movimiento de la anterior). La usan las posturas personalizadas de la app.
+void cmdPostura(const BiomecArgs& a) {
+  Pos obj[3];
+  long ang = a.toInt(3, -1);
+  bool ok = a.count == 4 && a.v[3].length() > 0 && isDigit(a.v[3][0]) && ang >= 0 && ang <= 180;
+  for (int i = 0; i < 3 && ok; i++) ok = letraPos(a.v[i], obj[i]);
+  if (!ok) {
+    reply("ERR Uso: POSTURA <A|C|-> <A|C|-> <A|C|-> <0-180>  (indice medio anular pulgar)");
+    return;
+  }
+  modoAuto = false;
+  gestoActual = -1;
+  for (int g = 0; g < N; g++) {  // si coincide con un gesto de la tabla, se informa como ese gesto
+    const Gesto& G = GESTOS[g];
+    if (G.indice == obj[0] && G.medio == obj[1] && G.anular == obj[2] && G.pulgar == ang) gestoActual = g;
+  }
+  anguloPulgar = ang;
+  pulgar_S.write(anguloPulgar);
+  moverA(obj[0], obj[1], obj[2]);
+  reply("ACK POSTURA %c %c %c %ld", letra(obj[0]), letra(obj[1]), letra(obj[2]), ang);
+}
+
 void cmdParar(const BiomecArgs&) {
   modoAuto = false;
   cancelarMovimiento();
@@ -335,9 +371,10 @@ void cmdPeriodo(const BiomecArgs& a) {
 const char* textoPos(Pos p) { return p == ABIERTO ? "abierto" : p == CERRADO ? "cerrado" : "?"; }
 
 void cmdEstado(const BiomecArgs&) {
-  reply("ACK ESTADO modo=%s fase=%s gesto=%s indice=%s medio=%s anular=%s pulgar=%d tiempo=%lu",
+  // gesto = número (1..N, 0 = posición personalizada): los nombres llevan espacios y romperían el formato clave=valor
+  reply("ACK ESTADO modo=%s fase=%s gesto=%d indice=%s medio=%s anular=%s pulgar=%d tiempo=%lu",
         modoAuto ? "AUTO" : "MANUAL", fase == MOVIENDO ? "moviendo" : "parado",
-        gestoActual >= 0 ? GESTOS[gestoActual].nombre : "personalizado",
+        gestoActual + 1,
         textoPos(posDedo[0]), textoPos(posDedo[1]), textoPos(posDedo[2]),
         anguloPulgar, tiempoFase);
 }
@@ -358,6 +395,7 @@ const HandCommand COMMANDS[] = {
   {"CERRAR",  cmdCerrar},
   {"DEDO",    cmdDedo},
   {"PULGAR",  cmdPulgar},
+  {"POSTURA", cmdPostura},
   {"PARAR",   cmdParar},
   {"AUTO",    cmdAuto},
   {"MANUAL",  cmdManual},

@@ -3,3 +3,5 @@ pyserial>=3.5
 pyqtgraph>=0.13
 numpy
 PyOpenGL>=3.1
+anthropic>=2.6  # asistente IA (opcional: la app arranca sin él)
+vosk>=0.3.41    # control por voz sin internet

@@ -26,8 +26,8 @@
     "Proximal":        {"archivo": "ProximalV1-1",        "color": "#d9dee8"},
     "Medio":           {"archivo": "MedioV1-1",           "color": "#d9dee8"},
     "Distal":          {"archivo": "DistalV1-1",          "color": "#d9dee8"},
-    "Base-Medio":      {"archivo": "Base-MedioV1-1",      "color": "#3b82f6"},
-    "Proximal-Distal": {"archivo": "Proximal-DistalV1-1", "color": "#3b82f6"}
+    "Base-Medio":      {"archivo": "Base-MedioV1-1",      "color": "#8e98aa"},
+    "Proximal-Distal": {"archivo": "Proximal-DistalV1-1", "color": "#8e98aa"}
   },
 
   "flexion_max_grados": 50,
@@ -38,7 +38,7 @@
 
   "pulgar": {
     "archivo": "mano - Pulgar V2-1.STL",
-    "color": "#f59e0b",
+    "color": "#c9d0dc",
     "eje": "x",
     "eje_punto": [48.05, 72.48],
     "_eje": "Cierre en pinza: gira sobre el pasador transversal de su base (eje X, punto (y, z)). Para un eje paralelo a Y usar \"eje\": \"y\" y el punto (x, z).",

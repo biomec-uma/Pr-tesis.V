@@ -30,3 +30,15 @@ def user_data_dir() -> Path:
     path = root / APP_NAME
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def documents_dir(sub: str = "") -> Path:
+    """Carpeta visible para el usuario: Documentos/BIOMEC Control[/sub] (sesiones, datos EMG, modelos)."""
+    try:
+        from PySide6.QtCore import QStandardPaths
+        docs = Path(QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation))
+    except Exception:  # noqa: BLE001  (sin Qt: pruebas, scripts)
+        docs = Path.home() / "Documents"
+    path = docs / APP_NAME / sub if sub else docs / APP_NAME
+    path.mkdir(parents=True, exist_ok=True)
+    return path
