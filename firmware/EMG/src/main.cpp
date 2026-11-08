@@ -5,12 +5,13 @@
 #define BATCH 10 //Agrupar 10 muestras (1 muestra/2ms ~ 20ms)
 #define N_CHNLS 2 //Cambiamos al numero de canales que necesitemos
 
+//NO CAMBIAR EL ORDEN DE LOS CAMPOS DEL STRUCT
 typedef struct __attribute__((packed)){//__attribute__ es para no meter relleno cuando halla espacios, en este caso no lo haría porque el tamaño es el justo
   uint8_t version; //Formato (nos puede ayudar en el futuro)
   uint8_t nChnls; //Nº de canales
   uint8_t batch; //Nº de muestras por paquete
-  uint16_t sendFails;//Nº de envios fallidos
   uint32_t seq; //El numero de paquete
+  uint16_t sendFails;//Nº de envios fallidos
   int16_t data[BATCH][N_CHNLS];
 } Packet;
 static_assert(sizeof(Packet) <= 250, "El paquete excede la capacidad, reducir BATCH o N_CHNLS");
