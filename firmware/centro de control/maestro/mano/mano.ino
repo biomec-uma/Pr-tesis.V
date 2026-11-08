@@ -131,9 +131,12 @@ void abrirDedo(Motor& motor) {
 void pararDedo(Motor& motor) {
   unsigned long t = constrain(tiempoEnEstado, 0UL, duracionRampa);
   int duty = map(t, 0, duracionRampa, 255, 0);  // Rampa de bajada
-  // Si estaba en movimiento reduzco hasta 0; si ya estaba parado no hago nada
-  if (ledcRead(motor.pinA) > 0) ledcWrite(motor.pinA, duty);
-  if (ledcRead(motor.pinB) > 0) ledcWrite(motor.pinB, duty);
+  // Si estaba en movimiento reduzco hasta 0; si ya estaba parado no hago nada.
+  // min(): si se interrumpió un movimiento a media rampa (duty < 255), frena
+  // desde la velocidad que llevaba en vez de dar un acelerón hasta 255.
+  int a = ledcRead(motor.pinA), b = ledcRead(motor.pinB);
+  if (a > 0) ledcWrite(motor.pinA, min(a, duty));
+  if (b > 0) ledcWrite(motor.pinB, min(b, duty));
 }
 
 void ConfiguracionDeMotores() {

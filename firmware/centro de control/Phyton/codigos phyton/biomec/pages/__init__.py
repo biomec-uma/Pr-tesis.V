@@ -10,10 +10,12 @@ El orden de la lista es el orden en la barra lateral.
 
 from .commands import CommandsPage
 from .console import ConsolePage
+from .hand3d import Hand3DPage
 from .telemetry import TelemetryPage
 
 PAGES = [
     ConsolePage,
     CommandsPage,
     TelemetryPage,
+    Hand3DPage,
 ]

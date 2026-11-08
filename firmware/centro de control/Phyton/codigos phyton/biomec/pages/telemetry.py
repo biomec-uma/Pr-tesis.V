@@ -129,6 +129,7 @@ class TelemetryPage(BasePage):
         s.checkbox.toggled.connect(s.curve.setVisible)
         s.value_label = QLabel("—")
         s.value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        s.value_label.setMinimumWidth(70)  # que quepan valores como "-255" o "1.234e+03"
         self.signals_grid.addWidget(s.checkbox, row, 0)
         self.signals_grid.addWidget(s.value_label, row, 1)
         self.empty_hint.hide()

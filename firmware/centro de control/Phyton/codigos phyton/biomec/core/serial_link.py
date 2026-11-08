@@ -12,11 +12,16 @@ from serial.tools import list_ports
 from PySide6.QtCore import QObject, Signal
 
 from .protocol import Message, MessageKind, parse_line
+from .simulator import SIMULATOR_PORT, SimulatedSerial
 
 
 def available_ports() -> list[tuple[str, str]]:
-    """[(dispositivo, descripción), ...] p. ej. [('COM5', 'USB JTAG/serial debug unit')]"""
-    return [(p.device, p.description) for p in list_ports.comports()]
+    """[(dispositivo, descripción), ...] p. ej. [('COM5', 'USB JTAG/serial debug unit')]
+
+    Siempre incluye al final el simulador, para poder trabajar sin hardware.
+    """
+    ports = [(p.device, p.description) for p in list_ports.comports()]
+    return ports + [(SIMULATOR_PORT, "Mano simulada (sin hardware)")]
 
 
 class SerialLink(QObject):
@@ -44,7 +49,10 @@ class SerialLink(QObject):
     def connect(self, port: str, baudrate: int) -> None:
         self.disconnect()
         try:
-            self._serial = serial.Serial(port=port, baudrate=baudrate, timeout=0.05, write_timeout=1)
+            if port == SIMULATOR_PORT:
+                self._serial = SimulatedSerial(timeout=0.05)
+            else:
+                self._serial = serial.Serial(port=port, baudrate=baudrate, timeout=0.05, write_timeout=1)
         except (serial.SerialException, OSError) as error:
             self._serial = None
             self._system(f"No se pudo abrir {port}: {error}", error=True)

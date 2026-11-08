@@ -1,0 +1,53 @@
+{
+  "_info": "Modelo 3D de la mano (pestaña 'Mano 3D'). Coordenadas en mm, tal como salen del ensamblaje de SolidWorks exportado a STL. Los pasadores (y, z) se detectaron de los agujeros de cada pieza; los dedos giran alrededor del eje X. Si cambia el diseño: re-exportar los STL a assets/modelo3d y actualizar este archivo.",
+
+  "carpeta": "modelo3d",
+
+  "piezas_fijas": [
+    {"archivo": "mano - PalmaV2-4.STL",          "color": "#8a94a6"},
+    {"archivo": "mano - Tapa cables V1.1-1.STL", "color": "#5b6476"}
+  ],
+
+  "dedos": {
+    "indice": {"ensamblaje": "Ensamblaje_DedoV1-2",
+               "pasadores": {"A": [112.72, 106.74], "B": [106.65, 91.73], "C": [156.88, 106.32], "D": [143.35, 121.10],
+                             "E": [192.46, 92.91],  "F": [155.62, 93.37], "G": [183.32, 107.30]}},
+    "medio":  {"ensamblaje": "Ensamblaje_DedoV1-1",
+               "pasadores": {"A": [112.72, 106.74], "B": [106.65, 91.73], "C": [156.88, 106.12], "D": [143.44, 120.98],
+                             "E": [192.37, 92.47],  "F": [155.56, 93.18], "G": [183.34, 106.93]}},
+    "anular": {"ensamblaje": "Ensamblaje_DedoV1-3",
+               "pasadores": {"A": [112.72, 106.74], "B": [106.65, 91.73], "C": [156.88, 106.32], "D": [143.35, 121.10],
+                             "E": [192.46, 92.91],  "F": [155.62, 93.37], "G": [183.32, 107.30]}}
+  },
+
+  "_pasadores": "A palma-proximal · B palma-biela Base-Medio · C proximal-medio · D biela Base-Medio-medio · E medio-distal · F proximal-biela Proximal-Distal · G biela-distal",
+
+  "piezas_dedo": {
+    "Proximal":        {"archivo": "ProximalV1-1",        "color": "#d9dee8"},
+    "Medio":           {"archivo": "MedioV1-1",           "color": "#d9dee8"},
+    "Distal":          {"archivo": "DistalV1-1",          "color": "#d9dee8"},
+    "Base-Medio":      {"archivo": "Base-MedioV1-1",      "color": "#3b82f6"},
+    "Proximal-Distal": {"archivo": "Proximal-DistalV1-1", "color": "#3b82f6"}
+  },
+
+  "flexion_max_grados": 50,
+  "_flexion": "Giro de la falange proximal con el dedo totalmente cerrado. Las demás falanges las arrastra el mecanismo.",
+
+  "tiempo_cierre_s": 1.5,
+  "_tiempo_cierre": "Tiempo que tarda un dedo en cerrarse del todo con PWM 255. Se usa para estimar la posición a partir de la telemetría (no hay sensor de posición). Ajustar midiendo la mano real.",
+
+  "pulgar": {
+    "archivo": "mano - Pulgar V2-1.STL",
+    "color": "#f59e0b",
+    "eje": "x",
+    "eje_punto": [48.05, 72.48],
+    "_eje": "Cierre en pinza: gira sobre el pasador transversal de su base (eje X, punto (y, z)). Para un eje paralelo a Y usar \"eje\": \"y\" y el punto (x, z).",
+    "angulo_modelo": 10,
+    "_angulo_modelo": "Ángulo del servo con el que se exportó el STL (pulgar abierto).",
+    "signo": 1,
+    "_signo": "Si en la app el pulgar se abre hacia fuera en vez de ir hacia el índice, cambiar a -1.",
+    "relacion": 0.5,
+    "_relacion": "Grados que gira el pulgar por cada grado del servo. 0.5 -> con el servo a 90 gira 40 grados. Por encima de ~55 grados de giro el pulgar roza la palma.",
+    "velocidad_grados_s": 300
+  }
+}
