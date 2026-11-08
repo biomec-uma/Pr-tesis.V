@@ -1,26 +1,44 @@
 #include <WiFi.h>
 #include <esp_now.h>
 #include <Adafruit_NeoPixel.h>
+// ----- Marco que se envía al PC por USB -----
+#define SYNC1 0xAA          // firma de inicio de cada marco
+#define SYNC2 0x55
+#define TIPO_DATOS  0x01    // marco con un paquete del sensor
+#define TIPO_ESTADO 0x02    // marco con el diagnóstico de la C6
 
-#define BATCH 20 //Agrupar 20 muestras (1 muestra/2ms ~ 40ms)
-#define N_CHNLS 2 //Cambiamos al numero de canales que necesitemos
+// ----- Paquete que llega del sensor -----
+#define CABECERA_SENSOR 9   // version(1) + nChnls(1) + batch(1) + seq(4) + sendFails(2)=9
+#define MAX_ESPNOW 250      // 250bytes máximo/paquete ESP-NOW
 
-typedef struct __attribute__((packed)){//__attribute__ es para no meter relleno cuando halla espacios, en este caso no lo haría porque el tamaño es el justo
-  uint16_t seq;
-  int16_t data[BATCH][N_CHNLS];
-} packet;
+// Hacemos un struct con el paquete y su tamaño 
+typedef struct {
+  uint8_t len;
+  uint8_t datos[MAX_ESPNOW];
+} Recibido;
 
-packet receivedPacket;
+// Otro struct con atributos sobre el diagnostico de los paquetes
+typedef struct __attribute__((packed)) {
+  uint8_t  mac[6];          // MAC de esta C6 (la que va en rxMac del sensor)
+  uint32_t recibidos;       // paquetes válidos recibidos
+  uint32_t invalidos;       // paquetes con tamaño incorrecto
+  uint32_t perdidosCola;    // llegaron pero la cola estaba llena
+  uint32_t descartadosUSB;  // no se pudieron mandar al PC (nadie leyendo)
+} Estado;
+QueueHandle_t cola;   // el "buzón" donde se guardan los paquetes recibidos hasta que se les da uso
+uint8_t miMac[6];
 
-//Variables globales
-volatile bool newPacket = false;
-volatile uint16_t packetCount = 0;
-volatile uint16_t invalidPackets = 0;
+//Las variables propias del struct de diagnostico 
+volatile uint32_t recibidos = 0;
+volatile uint32_t invalidos = 0;
+volatile uint32_t perdidosCola = 0;
+uint32_t descartadosUSB = 0;   // solo lo toca el loop: no hace falta volatile
+uint32_t ultimoPaqueteMs = 0;
 //Variables LED C6
 #define LED_PIN 8
 #define NUM_LEDS 1
 
-Adafruit_NeoPixel led(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
+Adafruit_NeoPixel led(NUM_LEDS, LED_PIN, NEO_RGB + NEO_KHZ800);
 
 void initLED(){
   led.begin();
@@ -29,35 +47,25 @@ void initLED(){
   led.show();
 }
 
-void ledRojo(){
-  led.setPixelColor(0, led.Color(0,255,0));
-  led.show();
-}
+void onDataReceived(const esp_now_recv_info_t *info, const uint8_t *data, int len){
+  // Si el paquete no tiene el tamaño correcto (ya sea por ser menor a la cabecera o mayor al permitido), lo descartamos y contamos
+  if (len < CABECERA_SENSOR || len > MAX_ESPNOW){ invalidos++; return; }
 
-void ledAzul(){
-  led.setPixelColor(0, led.Color(0,0,255));
-  led.show();
-}
+  // Son el 2º y el 3º byte nChnls y batch?.
+  uint8_t nChnls = data[1];
+  uint8_t batch  = data[2];
+  if (len != CABECERA_SENSOR + nChnls * batch * 2){ invalidos++; return; }
 
-void onDataReceived(const esp_now_recv_info_t *info, const uint8_t *incomingData, int len){
-
-  if (len != sizeof(packet)){
-    invalidPackets++;
-  }else{
-    memcpy(&receivedPacket, incomingData, sizeof(packet));
-    packetCount++;
-    newPacket = true;
-  }
-}
-
-void imprimirMAC(){
-  Serial.print("MAC del receptor: ");
-  Serial.println(WiFi.macAddress());
+  // A la cola. El 0 significa "no esperes": si está llena, se cuenta y se sigue
+  Recibido r;
+  r.len = len;
+  memcpy(r.datos, data, len);
+  if (xQueueSend(cola, &r, 0) == pdTRUE) recibidos++;
+  else perdidosCola++;
 }
 
 void comprobarEspNow(){
   if(esp_now_init() != ESP_OK){
-    Serial.println("Error inicializando ESP-NOW");
     ESP.restart();
   }
 }
@@ -69,48 +77,75 @@ void llamarTrasRecibirPaquete(esp_now_recv_cb_t funcion){
 void initEspNow(){
 
   WiFi.mode(WIFI_STA);
-  imprimirMAC();
+
   comprobarEspNow();
   llamarTrasRecibirPaquete(onDataReceived);
-  Serial.println("Receptor ESP-NOW listo");
-
 }
 
-void imprimePaquete(packet paquete){
+void enviarMarco(uint8_t tipo, const uint8_t *payload, uint8_t len){
+  uint8_t marco[4 + MAX_ESPNOW + 1];
+  marco[0] = SYNC1;
+  marco[1] = SYNC2;
+  marco[2] = tipo;
+  marco[3] = len;
+  memcpy(&marco[4], payload, len);
 
-  for(int i=0; i<BATCH; i++){
+  // Comprobación: XOR de tipo, longitud y todos los bytes del contenido
+  uint8_t chk = tipo ^ len;
+  for (int i = 0; i < len; i++) chk ^= payload[i];
+  marco[4 + len] = chk;
 
-    for(int j=0; j<N_CHNLS; j++){
-      if(j>0){
-        Serial.print('\t'); 
-      }
-      Serial.print(paquete.seq);
-      Serial.print('\t');
-      Serial.print(paquete.data[i][j]);
-    }
-    Serial.println();
-  }
+  int total = 5 + len;
+  // Si el PC no está leyendo, el buffer USB se llena: mejor descartar que bloquear
+  if (Serial.availableForWrite() < total){ descartadosUSB++; return; }
+  Serial.write(marco, total);
+}
+
+void enviarEstado(){
+  Estado e;
+  memcpy(e.mac, miMac, 6);
+  e.recibidos      = recibidos;
+  e.invalidos      = invalidos;
+  e.perdidosCola   = perdidosCola;
+  e.descartadosUSB = descartadosUSB;
+  enviarMarco(TIPO_ESTADO, (uint8_t*)&e, sizeof(e));
+}
+
+void actualizarLED(){
+  static int8_t pintado = -1;   // -1: todavía no se ha pintado nada
+  int8_t recibiendo = (millis() - ultimoPaqueteMs < 500) ? 1 : 0;
+  if (recibiendo == pintado) return;   // solo se toca el LED si cambia el estado
+  pintado = recibiendo;
+  led.setPixelColor(0, recibiendo ? led.Color(0, 0, 255) : led.Color(255, 0, 0));
+  led.show();
 }
 
 void setup(){
   Serial.begin(115200);
-  delay(1000); //espera a que ESP y puerto serie se inicialicen
-  initEspNow();
+  Serial.setTxTimeoutMs(0);  // no bloquear nunca al enviar por USB
   initLED();
+
+  cola=xQueueCreate(16, sizeof(Recibido));  // cola de 16 paquetes
+
+  WiFi.mode(WIFI_STA);
+  WiFi.macAddress(miMac);
+  if(esp_now_init() != ESP_OK){
+    ESP.restart();
+  }
+  esp_now_register_recv_cb(onDataReceived);
 }
 
 void loop(){
-  int cadaXmuestras = 0;
-  static int fila = 0;
-  static int columna = 0;
-
-  if(newPacket){ //Recibimos y lo procesamos
-    ledAzul();
-    noInterrupts(); //Desabilita interrupciones
-    packet packetToProcess = receivedPacket;
-    newPacket = false;
-    interrupts(); //Recibido, reactivar interrupciones
-    imprimePaquete(packetToProcess);    
+ Recibido r;
+  if (xQueueReceive(cola, &r, pdMS_TO_TICKS(5)) == pdTRUE){
+    enviarMarco(TIPO_DATOS, r.datos, r.len);
+    ultimoPaqueteMs = millis();
   }
-  
+  static uint32_t ultimoEstado=0;
+  if (millis() - ultimoEstado > 1000){
+    ultimoEstado = millis();
+    enviarEstado();
+  }
+
+  actualizarLED();
 }
