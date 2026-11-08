@@ -2,7 +2,7 @@
 #include <BIOMEC_ADS119X.h>
 #include <WiFi.h>
 #include <esp_now.h>
-#define BATCH 10 //Agrupar 10 muestras (1 muestra/2ms ~ 20ms)
+#define BATCH 5 //Agrupar 5 muestras (1 muestra/2ms ~ 10ms)
 #define N_CHNLS 2 //Cambiamos al numero de canales que necesitemos
 
 //NO CAMBIAR EL ORDEN DE LOS CAMPOS DEL STRUCT
