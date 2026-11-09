@@ -8,6 +8,11 @@ tabulador, coma, punto y coma o espacios.
 
 Uso: elegir puerto y velocidad -> Conectar -> (nombre opcional) -> Empezar / Parar.
 
+Columnas: al conectar, el programa mira las líneas que llegan y, si tienen un
+formato fijo (mismo número de valores), muestra una casilla por columna para
+elegir cuáles grabar. Si no reconoce un formato claro, graba la línea completa.
+Las líneas con otro formato (mensajes de arranque, avisos...) se graban enteras.
+
 Requisito para ejecutar el .py:  pip install pyserial
 Para crear el .exe: ejecutar build_exe.bat (logo.png e icono.ico en la misma carpeta)
 """
@@ -38,6 +43,8 @@ CONFIG = os.path.join(os.path.expanduser("~"), ".serial_logger.json")
 VELOCIDADES = ["9600", "19200", "38400", "57600", "115200", "230400", "460800", "921600"]
 NUM_RE = re.compile(r"^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$")
 MAX_LINEAS_MONITOR = 500
+MAX_LINEAS_DETECCION = 100   # líneas recientes que se miran para reconocer las columnas
+COLUMNAS_POR_FILA = 5        # casillas de columna por fila en la ventana
 
 # ============================================================================ COLORES
 # Para cambiar el aspecto, basta con tocar estos valores ("#RRGGBB").
@@ -89,6 +96,35 @@ def limpiar_nombre(nombre):
     return nombre or "grabacion"
 
 
+def nombres_columnas(cabecera, n, sugeridos=None):
+    """Nombre de cada una de las n columnas: los escritos a mano, si no los que
+    envió la placa, y si faltan, col1, col2..."""
+    propios = [c.strip() for c in cabecera.split(",") if c.strip()]
+    base = propios or list(sugeridos or [])
+    return [base[i] if i < len(base) else f"col{i + 1}" for i in range(n)]
+
+
+def detectar_columnas(lineas):
+    """Mira las últimas líneas y decide cuántas columnas tienen los datos.
+    Devuelve (n, última fila con ese formato) o None si no hay un formato claro."""
+    filas = [f for f in (separar(l) for l in lineas) if f]
+    numericas = [f for f in filas if all(es_numero(c) for c in f)]
+    base = numericas if len(numericas) >= 3 else filas
+    if len(base) < 3:
+        return None
+    n, veces = collections.Counter(len(f) for f in base).most_common(1)[0]
+    if n < 2 or veces < 0.6 * len(base):
+        return None
+    ultima = next(f for f in reversed(base) if len(f) == n)
+    return n, ultima
+
+
+def parece_cabecera(linea, campos):
+    """Línea tipo 'seq,idx,ch1' que algunas placas envían al arrancar."""
+    return (len(campos) >= 2 and any(s in linea for s in "\t,;")
+            and all(c and not es_numero(c) and len(c) <= 24 for c in campos))
+
+
 def abrir_puerto(puerto, baudios):
     ser = serial.Serial()
     ser.port = puerto
@@ -104,12 +140,17 @@ def abrir_puerto(puerto, baudios):
 class Grabacion:
     """Un archivo .csv abierto. procesar() se llama desde el hilo lector."""
 
-    def __init__(self, ruta, solo_numeros=False, excel=False, tiempo=True, cabecera=""):
+    def __init__(self, ruta, solo_numeros=False, excel=False, tiempo=True, nombres=None, indices=None):
+        """nombres: nombres de todas las columnas (vacío = col1, col2...).
+        indices: columnas a guardar; None = guardar la línea completa."""
         self.ruta = ruta
         self.solo_numeros = solo_numeros
         self.excel = excel
         self.tiempo = tiempo
-        self.cabecera = [c.strip() for c in cabecera.split(",") if c.strip()]
+        self.nombres = list(nombres or [])
+        self.indices = indices
+        self.n_cols = len(self.nombres)
+        self.otras = 0  # líneas con otro número de columnas (se guardan completas)
         self.f = open(ruta, "w", newline="", encoding="utf-8-sig")
         self.writer = csv.writer(self.f, delimiter=";" if excel else ",")
         self.cabecera_escrita = False
@@ -123,11 +164,19 @@ class Grabacion:
         if self.solo_numeros and not all(es_numero(c) for c in campos):
             self.ignoradas += 1
             return
+        if self.indices is not None:
+            if len(campos) == self.n_cols:
+                campos = [campos[i] for i in self.indices]
+            else:
+                self.otras += 1  # formato distinto: se guarda tal cual, sin filtrar
         ahora = time.time()
         if self.excel:
             campos = [c.replace(".", ",") if es_numero(c) else c for c in campos]
         if not self.cabecera_escrita:
-            nombres = self.cabecera or [f"col{i + 1}" for i in range(len(campos))]
+            if self.indices is not None:
+                nombres = [self.nombres[i] for i in self.indices]
+            else:
+                nombres = self.nombres or [f"col{i + 1}" for i in range(len(campos))]
             if self.tiempo:
                 nombres = ["fecha_hora", "t_s"] + nombres
             self.writer.writerow(nombres)
@@ -163,8 +212,14 @@ class Lector(threading.Thread):
         self.lock = threading.Lock()
         self.grab = None
         self.monitor = collections.deque(maxlen=MAX_LINEAS_MONITOR)
+        self.recientes = collections.deque(maxlen=MAX_LINEAS_DETECCION)  # para detectar columnas
+        self.cab_placa = None  # última cabecera enviada por la placa, si la hubo
         self.eventos = queue.Queue()
         self.total = 0
+
+    def copia_recientes(self):
+        with self.lock:
+            return list(self.recientes), self.cab_placa
 
     def empezar_grabacion(self, grab):
         with self.lock:
@@ -201,7 +256,11 @@ class Lector(threading.Thread):
                 continue
             self.total += 1
             self.monitor.append(linea)
+            campos = separar(linea)
             with self.lock:
+                self.recientes.append(linea)
+                if parece_cabecera(linea, campos):
+                    self.cab_placa = campos
                 if self.grab is not None:
                     try:
                         self.grab.procesar(linea)
@@ -228,9 +287,17 @@ class App:
         self.ultimo_t = time.time()
         self.lps = 0.0
         cfg = self.cargar_config()
+        # columnas detectadas
+        self.vars_col = []      # una BooleanVar por columna
+        self.chk_col = []       # una casilla por columna
+        self.muestra = []       # últimos valores recibidos (se ven junto al nombre)
+        self.cab_placa = None   # nombres que envió la placa, si los envió
+        self.ultima_deteccion = 0.0
+        self.n_cols_cfg = cfg.get("n_columnas")
+        self.col_off_cfg = set(cfg.get("columnas_off", []))
 
         root.title(APP_NOMBRE)
-        root.minsize(640, 600)
+        root.minsize(640, 680)
         root.configure(bg=FONDO)
         self.aplicar_tema_oscuro()
         self.poner_icono()
@@ -287,8 +354,9 @@ class App:
         ttk.Label(fg, text="Columnas:").grid(row=2, column=0, sticky="w", **pad)
         self.var_cabecera = tk.StringVar(value=cfg.get("cabecera", ""))
         ttk.Entry(fg, textvariable=self.var_cabecera).grid(row=2, column=1, columnspan=3, sticky="ew", **pad)
-        ttk.Label(fg, text="ej: seq,idx,ch1", style="Suave.TLabel").grid(
+        ttk.Label(fg, text="ej: seq,idx,ch1 (opcional)", style="Suave.TLabel").grid(
             row=2, column=4, columnspan=2, sticky="w", **pad)
+        self.var_cabecera.trace_add("write", lambda *a: self.actualizar_textos_columnas())
 
         fo = ttk.Frame(fg)
         fo.grid(row=3, column=0, columnspan=6, sticky="w", **pad)
@@ -299,6 +367,25 @@ class App:
         ttk.Checkbutton(fo, text="Añadir hora y tiempo", variable=self.var_tiempo).pack(side="left", padx=(0, 14))
         ttk.Checkbutton(fo, text="Formato Excel (; y coma decimal)", variable=self.var_excel).pack(side="left")
         fg.columnconfigure(1, weight=1)
+
+        # --- Columnas a grabar (se rellenan solas al detectar el formato de los datos)
+        fcol = ttk.LabelFrame(root, text="3. Columnas a grabar")
+        fcol.pack(fill="x", padx=10, pady=4)
+        barra_col = ttk.Frame(fcol)
+        barra_col.pack(fill="x")
+        self.var_info_col = tk.StringVar()
+        ttk.Label(barra_col, textvariable=self.var_info_col, style="Suave.TLabel").pack(
+            side="left", padx=6, pady=(2, 4))
+        self.btns_col = [
+            ttk.Button(barra_col, text="Ninguna", command=lambda: self.marcar_columnas(False)),
+            ttk.Button(barra_col, text="Todas", command=lambda: self.marcar_columnas(True)),
+        ]
+        for b in self.btns_col:
+            b.pack(side="right", padx=4, pady=(0, 4))
+            b.state(["disabled"])
+        self.frame_chk = ttk.Frame(fcol)
+        self.frame_chk.pack(fill="x", padx=6, pady=(0, 4))
+        self.actualizar_info_columnas()
 
         # --- Botón grande + estado
         fb = ttk.Frame(root)
@@ -418,6 +505,9 @@ class App:
             "solo_numeros": self.var_solo_num.get(),
             "tiempo": self.var_tiempo.get(),
             "excel": self.var_excel.get(),
+            "n_columnas": len(self.vars_col) or self.n_cols_cfg,
+            "columnas_off": ([i for i, v in enumerate(self.vars_col) if not v.get()]
+                             if self.vars_col else sorted(self.col_off_cfg)),
         }
         try:
             with open(CONFIG, "w", encoding="utf-8") as f:
@@ -488,6 +578,69 @@ class App:
         self.boton_estado("apagado")
         self.var_estado.set("Desconectado.")
 
+    # ----------------------------------------------------------------- columnas
+    def detectar(self):
+        """Reconoce el formato de las líneas recientes y crea/actualiza las casillas."""
+        lineas, cab = self.lector.copia_recientes()
+        r = detectar_columnas(lineas)
+        if r is None:
+            return
+        n, ultima = r
+        self.cab_placa = cab if cab and len(cab) == n else None
+        self.muestra = ultima
+        grabando = bool(self.lector.grab)
+        if n != len(self.vars_col) and not grabando:
+            self.construir_columnas(n)
+        else:
+            self.actualizar_textos_columnas()
+        self.actualizar_info_columnas()
+
+    def construir_columnas(self, n):
+        for w in self.frame_chk.winfo_children():
+            w.destroy()
+        restaurar = n == self.n_cols_cfg  # mismo formato que la última vez: recuperar la selección
+        self.vars_col, self.chk_col = [], []
+        for i in range(n):
+            v = tk.BooleanVar(value=not (restaurar and i in self.col_off_cfg))
+            c = ttk.Checkbutton(self.frame_chk, variable=v, width=20, command=self.actualizar_info_columnas)
+            c.grid(row=i // COLUMNAS_POR_FILA, column=i % COLUMNAS_POR_FILA, sticky="w", padx=(0, 6), pady=1)
+            self.vars_col.append(v)
+            self.chk_col.append(c)
+        for b in self.btns_col:
+            b.state(["!disabled"])
+        self.actualizar_textos_columnas()
+
+    def nombres_actuales(self):
+        return nombres_columnas(self.var_cabecera.get(), len(self.vars_col), self.cab_placa)
+
+    def actualizar_textos_columnas(self):
+        if not self.chk_col:
+            return
+        nombres = self.nombres_actuales()
+        for i, c in enumerate(self.chk_col):
+            valor = self.muestra[i] if i < len(self.muestra) else ""
+            texto = f"{nombres[i]}  ({valor})" if valor else nombres[i]
+            c.config(text=texto if len(texto) <= 22 else texto[:21] + "…")
+
+    def actualizar_info_columnas(self):
+        n = len(self.vars_col)
+        if not n:
+            self.var_info_col.set("Se detectan solas al llegar datos. Mientras tanto se graba la línea completa.")
+            return
+        k = sum(v.get() for v in self.vars_col)
+        self.var_info_col.set(f"{n} columnas detectadas — {k} marcadas. "
+                              "Las líneas con otro formato se graban completas.")
+
+    def marcar_columnas(self, valor):
+        for v in self.vars_col:
+            v.set(valor)
+        self.actualizar_info_columnas()
+
+    def bloquear_columnas(self, bloquear):
+        estado = ["disabled"] if bloquear else ["!disabled"]
+        for w in self.chk_col + (self.btns_col if self.chk_col else []):
+            w.state(estado)
+
     # ----------------------------------------------------------------- grabación
     def alternar_grabacion(self):
         if self.lector and self.lector.grab:
@@ -496,26 +649,39 @@ class App:
             self.empezar()
 
     def empezar(self):
+        if self.vars_col:
+            indices = [i for i, v in enumerate(self.vars_col) if v.get()]
+            if not indices:
+                messagebox.showwarning(APP_NOMBRE, "Marca al menos una columna para grabar.")
+                return
+            nombres = self.nombres_actuales()
+        else:  # formato no reconocido: línea completa
+            indices = None
+            nombres = [c.strip() for c in self.var_cabecera.get().split(",") if c.strip()]
         carpeta = self.var_carpeta.get().strip() or "."
         try:
             os.makedirs(carpeta, exist_ok=True)
             marca = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
             ruta = os.path.join(carpeta, f"{limpiar_nombre(self.var_nombre.get())}_{marca}.csv")
             grab = Grabacion(ruta, self.var_solo_num.get(), self.var_excel.get(),
-                             self.var_tiempo.get(), self.var_cabecera.get())
+                             self.var_tiempo.get(), nombres, indices)
         except Exception as e:
             messagebox.showerror(APP_NOMBRE, f"No se pudo crear el archivo:\n{e}")
             return
         self.lector.empezar_grabacion(grab)
         self.boton_estado("grabando")
+        self.bloquear_columnas(True)
         self.guardar_config()
 
     def parar(self):
         g = self.lector.parar_grabacion()
         self.boton_estado("listo")
+        self.bloquear_columnas(False)
         if g:
             d = g.duracion()
             extra = f", {g.ignoradas} de texto descartadas" if g.ignoradas else ""
+            if g.otras:
+                extra += f", {g.otras} con otro formato guardadas completas"
             msg = f"Guardado: {os.path.basename(g.ruta)} — {g.guardadas} filas en {d:.1f} s{extra}"
             self.var_estado.set(msg)
             self.escribir_monitor([f"--- {msg} ---"])
@@ -548,11 +714,15 @@ class App:
             if ahora - self.ultimo_t >= 1:
                 self.lps = (lec.total - self.ultimo_total) / (ahora - self.ultimo_t)
                 self.ultimo_total, self.ultimo_t = lec.total, ahora
+            if ahora - self.ultima_deteccion >= 1:
+                self.ultima_deteccion = ahora
+                self.detectar()
             g = lec.grab
             if g:
                 d = g.duracion()
+                cols = f" — {len(g.indices)}/{g.n_cols} columnas" if g.indices is not None else ""
                 self.var_estado.set(f"● GRABANDO {os.path.basename(g.ruta)} — {g.guardadas} filas — "
-                                    f"{d:.1f} s — {self.lps:.0f} líneas/s")
+                                    f"{d:.1f} s — {self.lps:.0f} líneas/s{cols}")
                 try:
                     lim = float(self.var_duracion.get().replace(",", "."))
                 except ValueError:
