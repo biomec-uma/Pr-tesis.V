@@ -49,7 +49,6 @@ void initEspNow() {
   memcpy(peer.peer_addr, rxMac, 6);
   peer.channel = CANAL_ESPNOW;          
   peer.encrypt = false;
-  esp_now_add_peer(&peer);
   if(esp_now_add_peer(&peer)!=ESP_OK){ESP.restart();}
 }
 
