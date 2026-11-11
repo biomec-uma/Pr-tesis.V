@@ -1,6 +1,9 @@
 #include <WiFi.h>
 #include <esp_now.h>
+#include <esp_wifi.h>
 #include <Adafruit_NeoPixel.h>
+// ----- Marco que se envía al PC por USB -----
+#define CANAL_ESPNOW  1 
 // ----- Marco que se envía al PC por USB -----
 #define SYNC1 0xAA          // firma de inicio de cada marco
 #define SYNC2 0x55
@@ -8,10 +11,10 @@
 #define TIPO_ESTADO 0x02    // marco con el diagnóstico de la C6
 
 // ----- Paquete que llega del sensor -----
-#define CABECERA_SENSOR 9   // version(1) + nChnls(1) + batch(1) + seq(4) + sendFails(2)=9
-#define MAX_ESPNOW 250      // 250bytes máximo/paquete ESP-NOW
+#define CABECERA_SENSOR 9   // version(1) + nChnls(1) + batch(1) + seq(4) + sendFails(2)=9 equivale a 1 fila sin valores EMG
+#define MAX_ESPNOW 250      // 250bytes/paquete equivale a tamaño maximoenviable por ESPNOW
 
-// Hacemos un struct con el paquete y su tamaño 
+// Hacemos un struct con el paquete tal cual llega y cuantos bytes validos tiene 
 typedef struct {
   uint8_t len;
   uint8_t datos[MAX_ESPNOW];
@@ -24,20 +27,22 @@ typedef struct __attribute__((packed)) {
   uint32_t invalidos;       // paquetes con tamaño incorrecto
   uint32_t perdidosCola;    // llegaron pero la cola estaba llena
   uint32_t descartadosUSB;  // no se pudieron mandar al PC (nadie leyendo)
-} Estado;
-QueueHandle_t cola;   // el "buzón" donde se guardan los paquetes recibidos hasta que se les da uso
+} Estado; //6+4*4=22bytes
+
+//=================Variables globales=================
+QueueHandle_t cola;   // el "buzón" donde el callback mete y el loop lo vacía
 uint8_t miMac[6];
 
-//Las variables propias del struct de diagnostico 
+//Las variables propias del struct de diagnostico son volatile porque los esvribe el callback
 volatile uint32_t recibidos = 0;
 volatile uint32_t invalidos = 0;
 volatile uint32_t perdidosCola = 0;
-uint32_t descartadosUSB = 0;   // solo lo toca el loop: no hace falta volatile
+uint32_t descartadosUSB = 0;   // solo lo toca el loop() no hace falta volatile
 uint32_t ultimoPaqueteMs = 0;
+
 //Variables LED C6
 #define LED_PIN 8
 #define NUM_LEDS 1
-
 Adafruit_NeoPixel led(NUM_LEDS, LED_PIN, NEO_RGB + NEO_KHZ800);
 
 void initLED(){
@@ -48,36 +53,30 @@ void initLED(){
 }
 
 void onDataReceived(const esp_now_recv_info_t *info, const uint8_t *data, int len){
-  // Si el paquete no tiene el tamaño correcto (ya sea por ser menor a la cabecera o mayor al permitido), lo descartamos y contamos
-  if (len < CABECERA_SENSOR || len > MAX_ESPNOW){ invalidos++; return; }
+  // data[version(1), nChnls(1), batch(1), seq(4), sendFails(2), data[nChnls*batch*2] 
 
-  // Son el 2º y el 3º byte nChnls y batch?.
-  uint8_t nChnls = data[1];
-  uint8_t batch  = data[2];
+  // Filtro para descartar paquetes con otro formato
+  if (len < CABECERA_SENSOR || len > MAX_ESPNOW){ invalidos++; return; }
+  //Registro el nº de canales y nº de muestras por paquete para 2ºcomprobación
+  uint8_t nChnls = data[1];  uint8_t batch  = data[2];
+  //Filtro para descartar paquetes corruptos a pesar de tener bien el formato
   if (len != CABECERA_SENSOR + nChnls * batch * 2){ invalidos++; return; }
 
-  // A la cola. El 0 significa "no esperes": si está llena, se cuenta y se sigue
+  // Creo un paquete ajustado al recibido por ESPNOW 
   Recibido r;
   r.len = len;
   memcpy(r.datos, data, len);
-  if (xQueueSend(cola, &r, 0) == pdTRUE) recibidos++;
-  else perdidosCola++;
+  if (xQueueSend(cola, &r, 0) == pdTRUE) recibidos++;//El 0 significa "no te bloquees si está lleno", se cuenta y se sigue
+  else perdidosCola++;//Si la cola estaba llena se cuenta como perdido
 }
 
-void comprobarEspNow(){
-  if(esp_now_init() != ESP_OK){
-    ESP.restart();
-  }
-}
-
-void llamarTrasRecibirPaquete(esp_now_recv_cb_t funcion){
-  esp_now_register_recv_cb(funcion);
-}
-
+//Con lo realizado en las funciones de antes (registrar problemas) inicio el protocolo
 void initEspNow(){
   WiFi.mode(WIFI_STA);
-  comprobarEspNow();
-  llamarTrasRecibirPaquete(onDataReceived);
+  WiFi.setSleep(false);
+  esp_wifi_set_channel(CANAL_ESPNOW, WIFI_SECOND_CHAN_NONE);
+  if(esp_now_init()!=ESP_OK) ESP.restart();
+  esp_now_register_recv_cb(onDataReceived);
 }
 
 void enviarMarco(uint8_t tipo, const uint8_t *payload, uint8_t len){
@@ -119,18 +118,15 @@ void actualizarLED(){
 }
 
 void setup(){
+
+  Serial.setTxBufferSize(2048);
   Serial.begin(115200);
   Serial.setTxTimeoutMs(0);  // no bloquear nunca al enviar por USB
   initLED();
 
   cola=xQueueCreate(16, sizeof(Recibido));  // cola de 16 paquetes
-
-  WiFi.mode(WIFI_STA);
+  initEspNow();
   WiFi.macAddress(miMac);
-  if(esp_now_init() != ESP_OK){
-    ESP.restart();
-  }
-  esp_now_register_recv_cb(onDataReceived);
 }
 
 void loop(){

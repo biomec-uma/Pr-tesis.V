@@ -2,11 +2,15 @@
 #include <BIOMEC_ADS119X.h>
 #include <WiFi.h>
 #include <esp_now.h>
+#include <esp_wifi.h>
+#define CANAL_ESPNOW 1
 #define BATCH 5 //Agrupar 5 muestras (1 muestra/2ms ~ 10ms)
 #define N_CHNLS 2 //Cambiamos al numero de canales que necesitemos
+#define DNI 1 //Version del paquete
 
-//NO CAMBIAR EL ORDEN DE LOS CAMPOS DEL STRUCT
-typedef struct __attribute__((packed)){//__attribute__ es para no meter relleno cuando halla espacios, en este caso no lo haría porque el tamaño es el justo
+//=================NO CAMBIAR EL ORDEN DE LOS CAMPOS DEL STRUCT=================
+//Estructura de mi paquete
+typedef struct __attribute__((packed)){//__attribute__ es para no meter relleno cuando halla espacios, por seguiridad pero no haría falta
   uint8_t version; //Formato (nos puede ayudar en el futuro)
   uint8_t nChnls; //Nº de canales
   uint8_t batch; //Nº de muestras por paquete
@@ -14,26 +18,39 @@ typedef struct __attribute__((packed)){//__attribute__ es para no meter relleno 
   uint16_t sendFails;//Nº de envios fallidos
   int16_t data[BATCH][N_CHNLS];
 } Packet;
-static_assert(sizeof(Packet) <= 250, "El paquete excede la capacidad, reducir BATCH o N_CHNLS");
-uint8_t rxMac[]={0xAC,0xEB,0xE6,0x2C,0xD7,0xDC}; //RECEPTOR C6
+//Restricción en envios (tamaño y dirección)
+static_assert(sizeof(Packet) <= 250, "El paquete excede la capacidad, reducir BATCH o N_CHNLS");//No compila si el tamaño excede
+uint8_t rxMac[]={0xAC,0xEB,0xE6,0x2C,0xD7,0xDC}; //Defino el MAC RECEPTOR C6 como rxMac
+//Creación de paquete e iniciación de variables
 Packet pkt;
-uint8_t idx=0;
-uint32_t seq=0;
-volatile uint16_t sendFails=0;
+uint8_t idx=0;//contador dentro de pkt
+uint32_t seq=0;//nºde paquete
+volatile uint16_t sendFails=0;//Los envios fallidos
+void initPaquete(){
+  pkt.version=DNI;
+  pkt.nChnls=N_CHNLS; 
+  pkt.batch=BATCH;
+}
+//=================================================
 
-
+//Contador de envios fallidos
 void onSent(const wifi_tx_info_t *info, esp_now_send_status_t s) {
   if (s != ESP_NOW_SEND_SUCCESS) sendFails++;
 }
+//Inicialización de ESP-NOW [se mete rxMAC y canal de radio]
 void initEspNow() {
   WiFi.mode(WIFI_STA);
+  WiFi.setSleep(false);
+  esp_wifi_set_channel(CANAL_ESPNOW,WIFI_SECOND_CHAN_NONE);
   if (esp_now_init() != ESP_OK) { ESP.restart(); }
   esp_now_register_send_cb(onSent);
+
   esp_now_peer_info_t peer = {};
   memcpy(peer.peer_addr, rxMac, 6);
-  peer.channel = 0;          // mismo canal que el receptor
+  peer.channel = CANAL_ESPNOW;          
   peer.encrypt = false;
   esp_now_add_peer(&peer);
+  if(esp_now_add_peer(&peer)!=ESP_OK){ESP.restart();}
 }
 
 //=================Variables del ADS===============
@@ -48,8 +65,6 @@ byte start_pin = 3;
 ADS119X adc(dataReady_Pin,reset_pin , cs_pin, clk_pin, miso_pin, mosi_pin);
 //Variables del ADS para utilidades
 volatile bool dataReady = false;
-bool flagReset=false;
-uint16_t contador_ceros_brutos=0;
 //Variables del ADS para hacer test
 bool testADS = false;
 const byte testModeRuidoInterno = 0x00;
@@ -61,40 +76,24 @@ const byte adsGanancia = ADS119X_CHnSET_GAIN_4;
 const byte adsSPS = ADS119X_DRATE_500SPS;
 //=================================================
 
-/*
-Para cada x muestras se toma la fila idx del momento e itera las columnas.
-Como resultado obtenemos una fila ix con todas sus columnas cada x muestras
-*/
+
+//Recojo el valor del ADS en un canal y lo guardo en el paquete para enviar
 void printData() {
-  bool todoCero=true;
-  int cadaXmuestras = 1;
-  
+  int cadaXmuestras = 1;//Por si quisiera imprimir con saltos (1= cada muestra, 2 = cada 2 muestras, etc)
   for(int ch=0;ch<N_CHNLS;ch++){
     int16_t v=adc.getChannelData(ch);
-    pkt.data[idx][ch]=v;//Lo guardo al paquete de envío
-    if(v!=0) {
-      todoCero=false;
-    }
+    pkt.data[idx][ch]=v;//Guarda el valor del canal ch en la fila idx del paquete
   }
-  
-  if(++idx==BATCH){//Cuando tenga 20 muestras pero siempre incrementa antes de evaluar
-    pkt.seq=seq++; //Enumeración de dato para verla en orden
-    pkt.sendFails=sendFails; //Nº de envios fallidos
+  if(++idx==BATCH){//Incremento el contador y comparo con el maximo de muestras por paquete
+    pkt.seq=seq++; //Registramos el nº del paquete
+    pkt.sendFails=sendFails; //Registramos el nº de envios fallidos
     esp_now_send(rxMac, (uint8_t*)&pkt, sizeof(pkt));
     idx=0;//Vacio contador
   }
-
-  if (todoCero == true) {//Comprueba que no se haya quedado atrancado el ADS
-    contador_ceros_brutos = contador_ceros_brutos + 1;
-  } else {
-    contador_ceros_brutos = 0;
-  }
-  if(contador_ceros_brutos > 750) flagReset = true; //Solo se reciben 0 => restart ESP
 }
 
 //=================INTERRUPCIONES==========================
-
-//Interrupcion ADS. DataReady
+//Interrupcion ADS. DataReady (cada vez que recibo un valor )
 void IRAM_ATTR dataReadyADS(){
   dataReady = true;
 }
@@ -131,17 +130,17 @@ void prepararADS(){
   //--------------------------------------------------------------------
   
   // 1. Retardo inicial para "despertar"--------------------------------
-  Serial.println("Esperando estabilización de energía...");
+  //Serial.println("Esperando estabilización de energía...");
   delay(1000); 
-  // 2. Bucle de reintentos
+  // 2. En caso de no conectar lo reintenta 7 veces más en caso contrario se reinicia
   int intentos = 0;
   int maxIntentos = 7;
   bool conectado = false;
   while (intentos < maxIntentos && !conectado) {
-    Serial.printf("Intento de conexión ADS1198: %d de %d...\n", intentos + 1, maxIntentos);
+    //Serial.printf("Intento de conexión ADS1198: %d de %d...\n", intentos + 1, maxIntentos);
     if (adc.begin()) {
       conectado = true;
-      Serial.println("¡ADS1198 Conectado con éxito!");
+      //Serial.println("¡ADS1198 Conectado con éxito!");
     }else{
       intentos++;
       delay(500); 
@@ -150,21 +149,19 @@ void prepararADS(){
   //--------------------------------------------------------------------
   // 3. Si después de los intentos no conecta, resetear ESP32-----------
   if (!conectado) {
-    Serial.println("Fallo crítico: No se pudo conectar con el ADS. Reiniciando microcontrolador...");
-    delay(2000); 
+    //Serial.println("Fallo crítico: No se pudo conectar con el ADS. Reiniciando microcontrolador...");
+    delay(1000); 
     ESP.restart(); 
   }  
-
 }
 
 /*Esta funcion debe ejecutarse siempre despues de prepararADS()*/
 void configurarADS(){
   
-  // Stop continuous conversion, and send commands to configure 
+  // Stop continuous conversion, and send commands to configure (un poco de ingles por si te parecia aburrido)
   adc.sendCommand (ADS119X_CMD_SDATAC);
   
   // ========== CAMBIO CRÍTICO 1: GANANCIA REDUCIDA ==========
-  // En 4.1 funciona bien, en 4.2 se satura. Usamos la de 4.1
   adc.setAllChannelGain(adsGanancia);
   adc.setAllChannelMux(ADS119X_CHnSET_MUX_NORMAL); //Este método activa todos los canales
 
@@ -202,32 +199,21 @@ void testearADS(bool testear, byte modo){
 }
 
 void setup() {
-  
-  Serial.begin(115200);
+
   prepararADS();
   configurarADS();
   testearADS(testADS,testModeSignalCuadrada);
-  pkt.version=1;
-  pkt.nChnls=N_CHNLS; 
-  pkt.batch=BATCH;
+  initPaquete();
   initEspNow();
   attachInterrupt(digitalPinToInterrupt(dataReady_Pin),dataReadyADS,FALLING);
+  Serial.begin(115200);
   Serial.println("\n===== SISTEMA LISTO =====\n");
 }
 
 void loop() {
-
   if(dataReady){
-
     dataReady = false; //Cambio estado provocado por la interrupcion
     adc.readChannelData();
     printData();    
-
   }
-
-  if (flagReset){
-    delay(100);
-    ESP.restart();    
-  }
-
 }
