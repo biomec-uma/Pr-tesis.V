@@ -1,10 +1,10 @@
 // =====================================================================
 //  BIOMEC UMA · ESP32-WROOM de la MANO
 //
-//  Basado en el código original de la mano (mismos pines, canales PWM,
-//  rampas y gestos), adaptado a:
-//    - core esp32 3.x (API nueva de LEDC; el timer hardware se sustituye
-//      por millis(), mismo periodo de 3 s)
+//  Basado en el código original de la mano (mismos pines, rampas y gestos)
+//  y en firmware/bucle_exposiciones (core 3.x, comprobado en la mano real):
+//    - PWM de los motores con ledcAttach(), igual que el bucle de exposiciones
+//    - el timer hardware se sustituye por millis(), mismo periodo de 3 s
 //    - control desde la app BIOMEC Control por ESP-NOW (vía la C6 puente)
 //
 //  Modos:
@@ -24,6 +24,7 @@
 #include <WiFi.h>
 #include <esp_now.h>
 #include <esp_wifi.h>
+#include <esp_system.h>
 #include <stdarg.h>
 #include "biomec_protocol.h"
 
@@ -40,13 +41,11 @@ unsigned long tiempoEnEstado = 0;          // Tiempo transcurrido dentro de la f
 const unsigned long duracionRampa = 500;   // Duración de la rampa en ms (0,5s)
 unsigned long tiempoFase = 3000;           // Antes: timer de 3 s. Ajustable con TIEMPO <ms>
 
-// VALORES PWM / canales
-const int canal_indiceA = 8;   // Canal..., puede ser de 0 a 15
-const int canal_indiceB = 9;
-const int canal_medioA  = 10;
-const int canal_medioB  = 11;
-const int canal_anularA = 12;
-const int canal_anularB = 13;
+// VALORES PWM (como en el bucle de exposiciones, comprobado en la mano real).
+// En el core 3.x ledcAttach() asigna el canal automáticamente y
+// ledcWrite()/ledcRead() trabajan directamente con el PIN.
+// No fijar los canales 8-15: en la ESP32 son el grupo de baja velocidad
+// y con ellos los motores no se movían.
 const int freq = 15000;        // frecuencia
 const int resolucion = 8;      // 8 bits -> 0-255
 
@@ -145,14 +144,30 @@ void ConfiguracionDeMotores() {
   // pulgar_S.setPeriodHertz(50);       // Frecuencia estándar para servos
   // pulgar_S.attach(pinS, 500, 2400);  // Anchos de pulso seguros (min, max)
 
-  // core 3.x: ledcAttachChannel(pin, freq, resolucion, canal) sustituye a
-  // ledcSetup + ledcAttachPin. Se mantienen los mismos canales (8-13).
-  ledcAttachChannel(indiceA, freq, resolucion, canal_indiceA);
-  ledcAttachChannel(indiceB, freq, resolucion, canal_indiceB);
-  ledcAttachChannel(medioA,  freq, resolucion, canal_medioA);
-  ledcAttachChannel(medioB,  freq, resolucion, canal_medioB);
-  ledcAttachChannel(anularA, freq, resolucion, canal_anularA);
-  ledcAttachChannel(anularB, freq, resolucion, canal_anularB);
+  // ledcAttach(pin, frecuencia, resolución): configura el canal y lo asocia al pin
+  // (después del servo, en el mismo orden que el bucle de exposiciones)
+  ledcAttach(indiceA, freq, resolucion);
+  ledcAttach(indiceB, freq, resolucion);
+  ledcAttach(medioA,  freq, resolucion);
+  ledcAttach(medioB,  freq, resolucion);
+  ledcAttach(anularA, freq, resolucion);
+  ledcAttach(anularB, freq, resolucion);
+}
+
+// Por qué arrancó la placa. Si los motores hacen caer la tensión, la mano se
+// reinicia y la app lo muestra en la consola como reinicio=BAJADA_DE_TENSION.
+const char* motivoReinicio() {
+  switch (esp_reset_reason()) {
+    case ESP_RST_POWERON:  return "encendido";
+    case ESP_RST_EXT:      return "boton";
+    case ESP_RST_SW:       return "software";
+    case ESP_RST_BROWNOUT: return "BAJADA_DE_TENSION";
+    case ESP_RST_PANIC:    return "FALLO";
+    case ESP_RST_INT_WDT:
+    case ESP_RST_TASK_WDT:
+    case ESP_RST_WDT:      return "WATCHDOG";
+    default:               return "otro";
+  }
 }
 
 // ======================= Máquina de estados ==========================
@@ -414,6 +429,7 @@ float tMedio()  { return pwmDedo(medio); }
 float tAnular() { return pwmDedo(anular); }
 float tPulgar() { return anguloPulgar; }
 float tGesto()  { return gestoActual + 1; }  // 0 = personalizado
+float tFase()   { return fase == MOVIENDO ? 1 : 0; }  // 1 mientras los motores ejecutan un movimiento
 
 struct TelemetrySignal {
   const char* key;  // nombre que verá la app (sin espacios ni '=')
@@ -427,6 +443,7 @@ const TelemetrySignal TELEMETRY[] = {
   {"anular", tAnular},
   {"pulgar", tPulgar},
   {"gesto",  tGesto},
+  {"fase",   tFase},
 };
 
 void sendTelemetry() {
@@ -496,8 +513,8 @@ void setup() {
   iniciarEspNow();
 
   irAGesto(0);  // Empieza abriendo la mano (como antes, Estado = 0)
-  Serial.printf("Mano lista. MAC=%s\n", WiFi.macAddress().c_str());
-  reply("Mano lista. MAC=%s modo=%s", WiFi.macAddress().c_str(), modoAuto ? "AUTO" : "MANUAL");
+  reply("Mano lista. MAC=%s modo=%s reinicio=%s", WiFi.macAddress().c_str(),  // por radio y por USB
+        modoAuto ? "AUTO" : "MANUAL", motivoReinicio());
 }
 
 void loop() {

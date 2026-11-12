@@ -17,6 +17,10 @@
 //     "ACK COMANDO ..."                comando ejecutado
 //     "ERR texto"                      error
 //     "BRIDGE texto"                   mensaje del puente
+//
+//  Excepción: la señal de la placa EMG (si está encendida) va del puente
+//  al PC en marcos binarios "AA 55 tipo longitud contenido XOR", entre
+//  las líneas de texto (ver puente_pc.ino). Sin placa EMG, todo es texto.
 // =====================================================================
 #pragma once
 #include <Arduino.h>

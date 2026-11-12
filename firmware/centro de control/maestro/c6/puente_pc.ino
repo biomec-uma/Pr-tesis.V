@@ -1,11 +1,17 @@
 // =====================================================================
 //  BIOMEC UMA · ESP32-C6 PUENTE (conectada al PC por USB)
 //
+//  Funciona CON y SIN la placa EMG (ESP32-C3 + ADS1198):
 //  - Lo que llega por USB se reenvía a la mano por ESP-NOW.
 //  - Lo que llega de la mano por ESP-NOW se imprime por USB.
 //  - Las líneas que empiezan por '@' son comandos del propio puente.
-//  - Los paquetes binarios de la placa EMG (ADS1198) se reenvían como
-//    líneas "EMG ..." si la app lo pide con @EMG 1 (ver sección EMG).
+//  - Si la placa EMG está encendida y envía a ESTA C6, su señal llega al
+//    PC (ver sección EMG). Sin placa EMG, el puente solo mueve la mano y
+//    por el USB solo salen líneas de texto.
+//
+//  Así una sola C6 hace de puente de la mano y de receptor EMG: sirve la
+//  DevKitC del puente o la Waveshare C6-Zero del receptor del equipo
+//  (las dos tienen el LED RGB en el GPIO 8).
 //
 //  Arduino IDE: placa "ESP32C6 Dev Module", core esp32 >= 3.0
 //  Herramientas -> "USB CDC On Boot: Enabled" (para usar el USB nativo).
@@ -13,6 +19,7 @@
 #include <WiFi.h>
 #include <esp_now.h>
 #include <esp_wifi.h>
+#include <stdarg.h>
 #include "biomec_protocol.h"
 
 // ---------------------------------------------------------------------
@@ -22,44 +29,159 @@
 // ---------------------------------------------------------------------
 uint8_t HAND_MAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
-static QueueHandle_t rxQueue;
-static String usbLine;
-
 // ---------------------------------------------------------------------
-// EMG: paquetes de la placa del ADS1198 (firmware/EMG/src/main.cpp):
-//     struct __attribute__((packed)) { uint16_t seq; int16_t data[BATCH][N_CHNLS]; }
-// Para que lleguen aquí, en ese firmware pon en rxMac la MAC de ESTE
-// puente (la muestra @INFO). Con @EMG 1 se reenvían a la app como
-//     EMG <seq> <canales> s1c1 s1c2 ... s2c1 s2c2 ...
-// y la pestaña "Entrenamiento" los usa para entrenar el clasificador.
+// EMG. La placa del ADS1198 manda sus paquetes por ESP-NOW a la MAC que
+// tenga en rxMac (firmware/EMG/src/main.cpp): tiene que ser la de ESTA
+// C6 (la muestra @INFO). Se entienden los dos formatos del equipo:
+//
+//  · Nuevo (rama Imprimir-seq):
+//        version=1, nChnls, batch, seq u32, sendFails u16, int16 data[batch][nChnls]
+//    Se reenvía al PC tal cual, en el mismo marco binario que el receptor
+//    del equipo (firmware/maestro de esa rama):
+//        AA 55 | tipo | longitud | contenido | XOR(tipo ^ longitud ^ contenido)
+//        tipo 0x01 = paquete del sensor
+//        tipo 0x02 = estado de esta C6 (1 por segundo mientras llega EMG)
+//    Lo entienden la app (en la conexión principal o en el Visor EMG) y el
+//    visor_emg.py del equipo.
+//
+//  · Antiguo (main): uint16 seq + int16 data[..][EMG_CANALES]. Se reenvía
+//    como línea de texto "EMG <seq> <canales> s1c1 s1c2 s2c1 s2c2 ...".
+//
+//  @EMG 0 deja de mandar el EMG al PC (consola de texto limpia) y @EMG 1
+//  lo vuelve a activar. Arranca activado.
 // ---------------------------------------------------------------------
-#define EMG_CANALES 2   // = N_CHNLS del firmware EMG
+#define EMG_CANALES 2   // canales del formato antiguo (= N_CHNLS de esa placa)
 uint8_t EMG_MAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};  // FF... = de cualquier placa
 
-bool emgReenviar = false;       // lo activa la app con @EMG 1
-uint32_t emgPaquetes = 0, emgPerdidos = 0;
-int32_t emgUltimoSeq = -1;
+#define SYNC1           0xAA
+#define SYNC2           0x55
+#define MARCO_DATOS     0x01
+#define MARCO_ESTADO    0x02
+#define CABECERA_SENSOR 9      // version + nChnls + batch + seq(4) + sendFails(2)
+#define VERSION_SENSOR  1
+#define RADIO_MAX       250    // tamaño máximo de un paquete ESP-NOW
+#define RADIO_COLA      24
+#define EMG_ACTIVO_MS   3000   // sin paquetes durante este tiempo = no hay placa EMG
+
+// Paquete recibido por ESP-NOW, copiado desde el callback a una cola para
+// procesarlo con calma en loop() (nunca dentro del callback).
+struct PaqueteRadio {
+  uint8_t mac[6];
+  uint8_t len;
+  uint8_t datos[RADIO_MAX + 1];   // +1: sitio para el '\n' de las líneas de texto
+};
+
+// Contenido del marco de estado (mismo orden que el receptor del equipo)
+struct __attribute__((packed)) EstadoEmg {
+  uint8_t  mac[6];           // MAC de esta C6 (la que va en rxMac del sensor)
+  uint32_t recibidos;        // paquetes EMG válidos
+  uint32_t invalidos;        // paquetes binarios que no son de ningún formato conocido
+  uint32_t perdidosCola;     // llegaron con la cola llena
+  uint32_t descartadosUSB;   // no cabían en el USB (el PC no estaba leyendo)
+};
+
+static QueueHandle_t rxQueue;
+static String usbLine;
+uint8_t miMac[6];
+
+bool emgReenviar = true;                 // @EMG 1 / @EMG 0
+uint32_t emgPaquetes = 0, emgPerdidos = 0, emgInvalidos = 0, descartadosUSB = 0;
+volatile uint32_t perdidosCola = 0;      // lo escribe el callback de ESP-NOW
+uint32_t emgUltimoSeq = 0;
+bool emgHaySeq = false;
+uint32_t emgUltimoMs = 0;
+uint8_t emgFormato = 0;                  // 0 ninguno todavía, 1 nuevo, 2 antiguo
+uint8_t emgCanales = 0, emgLote = 0;
+
+// ======================= Salida por USB ==============================
+// Todo se escribe desde loop() y entero o nada: si el PC no está leyendo,
+// mejor descartar que bloquear la radio o partir un marco por la mitad.
+bool usbEnviar(const uint8_t* buf, size_t n) {
+  if (Serial.availableForWrite() < (int)n) { descartadosUSB++; return false; }
+  Serial.write(buf, n);
+  return true;
+}
+
+// Una línea de texto al PC, con formato tipo printf: say("BRIDGE %s", x)
+void say(const char* fmt, ...) {
+  char buf[320];
+  va_list ap;
+  va_start(ap, fmt);
+  int n = vsnprintf(buf, sizeof(buf) - 1, fmt, ap);
+  va_end(ap);
+  if (n < 0) return;
+  if (n > (int)sizeof(buf) - 2) n = sizeof(buf) - 2;
+  buf[n++] = '\n';
+  usbEnviar((const uint8_t*)buf, n);
+}
+
+void enviarMarco(uint8_t tipo, const uint8_t* contenido, uint8_t n) {
+  uint8_t marco[5 + RADIO_MAX];
+  marco[0] = SYNC1;
+  marco[1] = SYNC2;
+  marco[2] = tipo;
+  marco[3] = n;
+  memcpy(&marco[4], contenido, n);
+  uint8_t x = tipo ^ n;
+  for (int i = 0; i < n; i++) x ^= contenido[i];
+  marco[4 + n] = x;
+  usbEnviar(marco, 5 + n);
+}
+
+bool emgActivo() {
+  return emgPaquetes > 0 && millis() - emgUltimoMs < EMG_ACTIVO_MS;
+}
+
+void enviarEstado() {
+  EstadoEmg e;
+  memcpy(e.mac, miMac, 6);
+  e.recibidos = emgPaquetes;
+  e.invalidos = emgInvalidos;
+  e.perdidosCola = perdidosCola;
+  e.descartadosUSB = descartadosUSB;
+  enviarMarco(MARCO_ESTADO, (const uint8_t*)&e, sizeof(e));
+}
+
+// LED: azul mientras llega EMG, blanco tenue si no (solo mano).
+// Azul y blanco se ven igual aunque el LED sea RGB o GRB.
+void actualizarLed() {
+#ifdef RGB_BUILTIN
+  static int8_t pintado = -1;
+  int8_t ahora = (emgPaquetes > 0 && millis() - emgUltimoMs < 500) ? 1 : 0;
+  if (ahora == pintado) return;
+  pintado = ahora;
+  if (ahora) rgbLedWrite(RGB_BUILTIN, 0, 0, 40);
+  else       rgbLedWrite(RGB_BUILTIN, 6, 6, 6);
+#endif
+}
 
 // ======================= Comandos del PUENTE (@...) ==================
 // Para añadir uno: escribe la función y añade UNA línea a BRIDGE_COMMANDS.
 // (y su entrada en config/commands.json con "target": "puente")
 
+const char* nombreFormato() {
+  return emgFormato == 1 ? "nuevo" : emgFormato == 2 ? "antiguo" : "ninguno";
+}
+
 void cmdPing(const BiomecArgs&) {
-  Serial.println("BRIDGE PONG");
+  say("BRIDGE PONG");
 }
 
 void cmdInfo(const BiomecArgs&) {
-  Serial.printf("BRIDGE MAC puente=%s mano=%s canal=%d emg=%d paquetes=%lu perdidos=%lu\n",
-                WiFi.macAddress().c_str(), biomecMacToString(HAND_MAC).c_str(),
-                BIOMEC_ESPNOW_CHANNEL, emgReenviar ? 1 : 0,
-                (unsigned long)emgPaquetes, (unsigned long)emgPerdidos);
+  say("BRIDGE MAC puente=%s mano=%s canal=%d emg=%d sensor=%s formato=%s canales=%u lote=%u "
+      "paquetes=%lu perdidos=%lu invalidos=%lu cola=%lu usb=%lu",
+      WiFi.macAddress().c_str(), biomecMacToString(HAND_MAC).c_str(), BIOMEC_ESPNOW_CHANNEL,
+      emgReenviar ? 1 : 0, emgActivo() ? "si" : "no", nombreFormato(), emgCanales, emgLote,
+      (unsigned long)emgPaquetes, (unsigned long)emgPerdidos, (unsigned long)emgInvalidos,
+      (unsigned long)perdidosCola, (unsigned long)descartadosUSB);
 }
 
-// @EMG 1 / @EMG 0: reenviar (o no) a la app las muestras de la placa EMG
+// @EMG 1 / @EMG 0: mandar (o no) a la app la señal de la placa EMG
 void cmdEmg(const BiomecArgs& a) {
   if (a.count > 0) emgReenviar = a.toInt(0) != 0;
-  Serial.printf("BRIDGE EMG %d canales=%d paquetes=%lu perdidos=%lu\n", emgReenviar ? 1 : 0,
-                EMG_CANALES, (unsigned long)emgPaquetes, (unsigned long)emgPerdidos);
+  say("BRIDGE EMG %d canales=%u sensor=%s formato=%s paquetes=%lu perdidos=%lu", emgReenviar ? 1 : 0,
+      emgCanales ? emgCanales : EMG_CANALES, emgActivo() ? "si" : "no", nombreFormato(),
+      (unsigned long)emgPaquetes, (unsigned long)emgPerdidos);
 }
 
 struct BridgeCommand {
@@ -77,12 +199,11 @@ const BridgeCommand BRIDGE_COMMANDS[] = {
 
 void onEspNowRecv(const esp_now_recv_info_t* info, const uint8_t* data, int len) {
   // Se ejecuta en la tarea WiFi: solo copiar y salir.
-  BiomecPacket p;
+  PaqueteRadio p;
   memcpy(p.mac, info->src_addr, 6);
-  p.len = min(len, BIOMEC_MAX_MSG);
-  memcpy(p.text, data, p.len);
-  p.text[p.len] = '\0';
-  xQueueSend(rxQueue, &p, 0);
+  p.len = (uint8_t)min(len, RADIO_MAX);
+  memcpy(p.datos, data, p.len);
+  if (xQueueSend(rxQueue, &p, 0) != pdTRUE) perdidosCola = perdidosCola + 1;  // (++ de volatile está obsoleto)
 }
 
 bool isBroadcast(const uint8_t* mac) {
@@ -108,32 +229,64 @@ bool esTexto(const uint8_t* s, int n) {
   return true;
 }
 
-bool esPaqueteEmg(const BiomecPacket& p) {
-  if (!isBroadcast(EMG_MAC) && memcmp(p.mac, EMG_MAC, 6) != 0) return false;
-  if (p.len < 2 + 2 * EMG_CANALES || (p.len - 2) % (2 * EMG_CANALES) != 0) return false;
-  return !esTexto((const uint8_t*)p.text, p.len);
+bool dePlacaEmg(const PaqueteRadio& p) {
+  return isBroadcast(EMG_MAC) || memcmp(p.mac, EMG_MAC, 6) == 0;
 }
 
-void reenviarEmg(const BiomecPacket& p) {
-  const uint8_t* b = (const uint8_t*)p.text;
-  uint16_t seq = b[0] | (b[1] << 8);  // little-endian, como lo escribe la ESP32
-  if (emgUltimoSeq >= 0) {
-    uint16_t hueco = (uint16_t)(seq - (uint16_t)emgUltimoSeq - 1);
-    if (hueco < 1000) emgPerdidos += hueco;  // si es enorme, la placa EMG se reinició
+// Formato nuevo: empieza por la versión (1) y la longitud cuadra con
+// canales x muestras (siempre es impar: 9 + un número par).
+bool esEmgNuevo(const PaqueteRadio& p) {
+  if (p.len < CABECERA_SENSOR || p.datos[0] != VERSION_SENSOR) return false;
+  uint8_t nch = p.datos[1], lote = p.datos[2];
+  return nch >= 1 && lote >= 1 && p.len == CABECERA_SENSOR + nch * lote * 2;
+}
+
+// Formato antiguo: uint16 seq + muestras de EMG_CANALES canales (longitud par)
+bool esEmgAntiguo(const PaqueteRadio& p) {
+  if (p.len < 2 + 2 * EMG_CANALES || (p.len - 2) % (2 * EMG_CANALES) != 0) return false;
+  return !esTexto(p.datos, p.len);
+}
+
+// Cuenta el paquete y los perdidos (saltos del número de paquete)
+void contarEmg(uint32_t seq, uint8_t formato, uint8_t canales, uint8_t lote) {
+  if (emgHaySeq && formato == emgFormato) {
+    uint32_t hueco = seq - emgUltimoSeq - 1;
+    if (formato == 2) hueco &= 0xFFFF;              // el formato antiguo cuenta con 16 bits
+    if (hueco < 1000) emgPerdidos += hueco;         // si es enorme, la placa EMG se reinició
   }
   emgUltimoSeq = seq;
+  emgHaySeq = true;
+  emgFormato = formato;
+  emgCanales = canales;
+  emgLote = lote;
   emgPaquetes++;
+  emgUltimoMs = millis();
+}
+
+void reenviarEmgNuevo(const PaqueteRadio& p) {
+  const uint8_t* b = p.datos;
+  uint32_t seq = b[3] | (b[4] << 8) | ((uint32_t)b[5] << 16) | ((uint32_t)b[6] << 24);
+  contarEmg(seq, 1, b[1], b[2]);
+  if (emgReenviar) enviarMarco(MARCO_DATOS, b, p.len);
+}
+
+void reenviarEmgAntiguo(const PaqueteRadio& p) {
+  const uint8_t* b = p.datos;
+  uint16_t seq = b[0] | (b[1] << 8);  // little-endian, como lo escribe la ESP32
+  contarEmg(seq, 2, EMG_CANALES, (p.len - 2) / (2 * EMG_CANALES));
   if (!emgReenviar) return;
 
-  static char out[24 + 7 * (BIOMEC_MAX_MSG / 2)];
+  static char out[24 + 7 * (RADIO_MAX / 2)];
   int n = snprintf(out, sizeof(out), "EMG %u %d", seq, EMG_CANALES);
   for (int i = 2; i + 1 < p.len && n < (int)sizeof(out) - 8; i += 2) {
     int16_t v = (int16_t)(b[i] | (b[i + 1] << 8));  // byte a byte: el puntero puede no estar alineado
     n += snprintf(out + n, sizeof(out) - n, " %d", v);
   }
-  Serial.write((const uint8_t*)out, n);
-  Serial.write('\n');
+  out[n++] = '\n';
+  usbEnviar((const uint8_t*)out, n);
 }
+
+// ======================= Mano ========================================
 
 void handleBridgeCommand(const String& line) {
   BiomecArgs args = BiomecArgs::parse(line.substring(1));  // sin la '@'
@@ -143,17 +296,17 @@ void handleBridgeCommand(const String& line) {
       return;
     }
   }
-  Serial.printf("ERR Comando de puente desconocido: %s\n", args.name.c_str());
+  say("ERR Comando de puente desconocido: %s", args.name.c_str());
 }
 
 void forwardToHand(const String& line) {
   if (line.length() > BIOMEC_MAX_MSG) {
-    Serial.println("ERR Comando demasiado largo para ESP-NOW");
+    say("ERR Comando demasiado largo para ESP-NOW");
     return;
   }
   esp_err_t r = esp_now_send(HAND_MAC, (const uint8_t*)line.c_str(), line.length());
   if (r != ESP_OK) {
-    Serial.printf("ERR ESP-NOW no pudo enviar (%s)\n", esp_err_to_name(r));
+    say("ERR ESP-NOW no pudo enviar (%s)", esp_err_to_name(r));
   }
 }
 
@@ -165,15 +318,24 @@ void handleUsbLine(String line) {
 }
 
 void setup() {
+#if ARDUINO_USB_MODE && ARDUINO_USB_CDC_ON_BOOT
+  Serial.setTxBufferSize(2048);   // antes de begin(): sitio para varios marcos EMG
+#endif
   Serial.begin(BIOMEC_SERIAL_BAUD);
-  rxQueue = xQueueCreate(BIOMEC_QUEUE_LEN, sizeof(BiomecPacket));
+#if ARDUINO_USB_MODE && ARDUINO_USB_CDC_ON_BOOT
+  Serial.setTxTimeoutMs(0);       // nunca bloquear al escribir: si el PC no lee, se descarta
+#endif
+  rxQueue = xQueueCreate(RADIO_COLA, sizeof(PaqueteRadio));
 
   WiFi.mode(WIFI_STA);
   WiFi.disconnect();
+  WiFi.setSleep(false);           // radio siempre despierta: se pierden menos paquetes
   esp_wifi_set_channel(BIOMEC_ESPNOW_CHANNEL, WIFI_SECOND_CHAN_NONE);
+  WiFi.macAddress(miMac);
+  actualizarLed();
 
   if (esp_now_init() != ESP_OK) {
-    Serial.println("ERR No se pudo iniciar ESP-NOW");
+    say("ERR No se pudo iniciar ESP-NOW");
     return;
   }
   esp_now_register_recv_cb(onEspNowRecv);
@@ -183,10 +345,10 @@ void setup() {
   peer.channel = BIOMEC_ESPNOW_CHANNEL;
   peer.encrypt = false;
   if (esp_now_add_peer(&peer) != ESP_OK) {
-    Serial.println("ERR No se pudo registrar la mano como peer");
+    say("ERR No se pudo registrar la mano como peer");
   }
 
-  Serial.printf("BRIDGE Puente listo. MAC=%s\n", WiFi.macAddress().c_str());
+  say("BRIDGE Puente listo. MAC=%s (con o sin placa EMG)", WiFi.macAddress().c_str());
 }
 
 void loop() {
@@ -198,10 +360,22 @@ void loop() {
   }
 
   // 2) mano / placa EMG -> USB
-  BiomecPacket p;
+  PaqueteRadio p;
   while (xQueueReceive(rxQueue, &p, 0) == pdTRUE) {
-    if (esPaqueteEmg(p)) { reenviarEmg(p); continue; }
+    if (dePlacaEmg(p) && esEmgNuevo(p))   { reenviarEmgNuevo(p);   continue; }
+    if (dePlacaEmg(p) && esEmgAntiguo(p)) { reenviarEmgAntiguo(p); continue; }
+    if (!esTexto(p.datos, p.len)) { emgInvalidos++; continue; }   // binario que no es de nadie conocido
     if (!isBroadcast(HAND_MAC) && memcmp(p.mac, HAND_MAC, 6) != 0) continue;  // otro dispositivo
-    Serial.println(p.text);
+    p.datos[p.len] = '\n';
+    usbEnviar(p.datos, p.len + 1);
   }
+
+  // 3) estado de la C6 (1/s) mientras llega EMG: MAC y contadores para el visor
+  static uint32_t ultimoEstado = 0;
+  if (emgReenviar && emgActivo() && millis() - ultimoEstado >= 1000) {
+    ultimoEstado = millis();
+    enviarEstado();
+  }
+
+  actualizarLed();
 }
