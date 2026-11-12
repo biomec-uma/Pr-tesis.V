@@ -73,18 +73,18 @@ const byte testModeSignalDC = 0x02;
 const byte N_CHNLS_TOTALES = 0x08;
 const byte adsGanancia = ADS119X_CHnSET_GAIN_4;
 const byte adsSPS = ADS119X_DRATE_500SPS;
-
+/*
 //Preconfiguraciones para registros
-/*Pre-conf registro CONFIG3 para RLD 0xCC = 1100 1100
-Activa unicamente la referencia interna y ref interna del AO RLD
-*/
+//Pre-conf registro CONFIG3 para RLD 0xCC = 1100 1100
+//Activa unicamente la referencia interna y ref interna del AO RLD
+
 byte preconfRLDConfig3 = 0xCC;
-/*Pre-conf registro RLD_SENSP y RLD_SENSN 
-El circuito RLD escucha el ruido de los electrodos de los canales CH1 y CH2
-*/
+//Pre-conf registro RLD_SENSP y RLD_SENSN 
+//El circuito RLD escucha el ruido de los electrodos de los canales CH1 y CH2
+
 byte preconfSENSPCH1yCH2 = 0x03;
 byte preconfSENSNCH1yCH2 = 0x03;
-
+*/
 //=================================================
 
 
@@ -209,6 +209,7 @@ void testearADS(bool testear, byte modo){
   }
 }
 
+/*
 void configurarRLD(){
 
   adc.sendCommand(ADS119X_CMD_SDATAC); //Primero siempre detener la lectura
@@ -219,6 +220,7 @@ void configurarRLD(){
   adc.sendCommand(ADS119X_CMD_RDATAC); //Siempre leer conversiones
 
 }
+*/
 
 void setup() {
 
