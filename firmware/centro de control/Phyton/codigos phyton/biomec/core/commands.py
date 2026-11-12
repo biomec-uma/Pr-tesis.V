@@ -99,7 +99,7 @@ class CommandCatalog:
         name = parts[0].upper().lstrip(BRIDGE_PREFIX)
         cmd = self.get(name)
         if cmd is None:
-            raise CommandError(f"Comando desconocido: {name}. Consulta la pestaña Comandos.")
+            raise CommandError(f"Comando desconocido: {name}. Consulta la ventana Comandos.")
         args = parts[1:]
         if len(args) != len(cmd.args):
             raise CommandError(f"{cmd.name} espera {len(cmd.args)} argumento(s). Uso: {cmd.usage}")

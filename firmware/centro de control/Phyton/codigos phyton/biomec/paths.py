@@ -32,13 +32,16 @@ def user_data_dir() -> Path:
     return path
 
 
-def documents_dir(sub: str = "") -> Path:
-    """Carpeta visible para el usuario: Documentos/BIOMEC Control[/sub] (sesiones, datos EMG, modelos)."""
+def documents_dir(sub: str = "", create: bool = True) -> Path:
+    """Carpeta visible para el usuario: Documentos/BIOMEC Control[/sub] (sesiones, datos EMG, modelos).
+
+    create=False solo calcula la ruta (p. ej. un valor por defecto que quizá no se use)."""
     try:
         from PySide6.QtCore import QStandardPaths
         docs = Path(QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation))
     except Exception:  # noqa: BLE001  (sin Qt: pruebas, scripts)
         docs = Path.home() / "Documents"
     path = docs / APP_NAME / sub if sub else docs / APP_NAME
-    path.mkdir(parents=True, exist_ok=True)
+    if create:
+        path.mkdir(parents=True, exist_ok=True)
     return path

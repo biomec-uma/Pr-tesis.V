@@ -1,6 +1,6 @@
 // =====================================================================
 //  BIOMEC UMA · Protocolo común PC <-> Puente <-> Mano
-//  ¡Este archivo debe ser IDÉNTICO en firmware/puente_pc y firmware/mano!
+//  ¡Este archivo debe ser IDÉNTICO en puente_pc/include y mano/include!
 // =====================================================================
 //
 //  PC  --USB serie-->  C6 PUENTE  --ESP-NOW-->  C6 MANO
@@ -20,7 +20,7 @@
 //
 //  Excepción: la señal de la placa EMG (si está encendida) va del puente
 //  al PC en marcos binarios "AA 55 tipo longitud contenido XOR", entre
-//  las líneas de texto (ver puente_pc.ino). Sin placa EMG, todo es texto.
+//  las líneas de texto (ver puente_pc.cpp). Sin placa EMG, todo es texto.
 // =====================================================================
 #pragma once
 #include <Arduino.h>

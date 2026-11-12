@@ -1,32 +1,38 @@
-"""Pestaña 'Gemelo digital': el modelo de SolidWorks moviéndose como la mano.
+"""Gemelo digital: dos ventanas que comparten el mismo estado estimado de la mano.
 
-┌ Vista 3D  [¾][Palma][Dorso][Lateral] ┐ ┌ [Control][Postura] ──────┐
-│                                       │ │ Control: seguir a la mano,│
-│   modelo 3D (dedos con motor activo   │ │   % de cierre de cada dedo│
-│   resaltados en azul)                 │ │ Postura: gestos, dedos,   │
-│                                       │ │   pulgar y modo           │
-└───────────────────────────────────────┘ └───────────────────────────┘
+  Ventana "Gemelo digital"                        Ventana "Posturas"
+  ┌ [¾][Palma][Dorso][Lateral]   ● Motor en marcha ┐  ┌ Gestos (galería)              ┐
+  │                                                 │  │ Mis posturas  [+ Nueva]       │
+  │        modelo 3D (dedos con motor activo        │  │ Dedos: abrir / cerrar         │
+  │        resaltados en azul)                      │  │ Pulgar: deslizador            │
+  │                                                 │  │ Modo: Manual / Demo           │
+  │ ☑ Seguir a la mano  índice 0 %  medio 0 % …     │  └───────────────────────────────┘
+  └─────────────────────────────────────────────────┘
 
 Postura del 3D:
   - Seguir a la mano: se estima con la telemetría (STREAM 1):
       PWM de cada dedo -> se integra en el tiempo -> flexión 0..1
       (no hay sensor de posición; ver "tiempo_cierre_s" en config/mano3d.json).
       Las respuestas de ESTADO corrigen la estimación (abierto/cerrado).
-  - Manual (pestaña Control): deslizadores para ver cualquier postura sin hardware.
+  - Manual (Seguir desactivado): deslizadores para ver cualquier postura sin hardware.
+
+La vista 3D encuadra por el ALTO (core/hand_model.frustum): al abrir o cerrar otras ventanas
+cambia el ancho y la mano no cambia de escala.
 """
 
 import time
+from math import radians, tan
 
 import numpy as np
-from PySide6.QtCore import QSettings, QSize, Qt, QTimer
+from PySide6.QtCore import QSize, Qt, QTimer
+from PySide6.QtGui import QMatrix4x4
 from PySide6.QtWidgets import (
-    QButtonGroup, QCheckBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSlider,
-    QSizePolicy, QStackedWidget, QToolButton, QVBoxLayout, QWidget,
+    QCheckBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSlider, QSizePolicy,
+    QToolButton, QVBoxLayout, QWidget,
 )
 
-from .. import APP_NAME, ORG_NAME
 from ..core.gestures import ABIERTO, CERRADO, GESTOS, Gesto
-from ..core.hand_model import DEDOS, HandModel
+from ..core.hand_model import DEDOS, HandModel, frustum
 from ..core.postures import posture_command, posture_spec
 from ..core.protocol import MessageKind
 from ..paths import ASSETS_DIR, config_file
@@ -36,7 +42,7 @@ from ..ui.theme import PALETTES
 from ..ui.widgets import ElidedLabel, Segmented
 from .base import BasePage
 
-try:  # el 3D necesita PyOpenGL; si falta, la pestaña lo explica en vez de romper la app
+try:  # el 3D necesita PyOpenGL; si falta, la ventana lo explica en vez de romper la app
     import pyqtgraph as pg
     import pyqtgraph.opengl as gl
     from pyqtgraph.opengl.GLGraphicsItem import GLGraphicsItem
@@ -72,6 +78,32 @@ try:  # el 3D necesita PyOpenGL; si falta, la pestaña lo explica en vez de romp
             }
         """),
     ])
+
+    class HandGLView(gl.GLViewWidget):
+        """Vista 3D cuyo encuadre depende solo del alto (ver core/hand_model.frustum)."""
+
+        def projectionMatrix(self, region, viewport):
+            x0, y0, w, h = viewport
+            left, right, bottom, top, near, far = frustum(self.opts["fov"], self.opts["distance"], w, h)
+            # la región pintada puede ser parte del viewport (pyqtgraph lo usa para capturas por trozos)
+            l_ = right * ((region[0] - x0) * (2.0 / w) - 1)
+            r_ = right * ((region[0] + region[2] - x0) * (2.0 / w) - 1)
+            b_ = top * ((region[1] - y0) * (2.0 / h) - 1)
+            t_ = top * ((region[1] + region[3] - y0) * (2.0 / h) - 1)
+            tr = QMatrix4x4()
+            tr.frustum(l_, r_, b_, t_, near, far)
+            return tr
+
+        def pixelSize(self, pos):
+            """Tamaño de un píxel en unidades del modelo (lo usa el desplazamiento con el ratón)."""
+            cam = self.cameraPosition()
+            if isinstance(pos, np.ndarray):
+                cam = np.array(cam).reshape((1,) * (pos.ndim - 1) + (3,))
+                dist = ((pos - cam) ** 2).sum(axis=-1) ** 0.5
+            else:
+                dist = (pos - cam).length()
+            return dist * 2.0 * tan(0.5 * radians(self.opts["fov"])) / max(self.height(), 1)
+
     _GL_ERROR = None
 except Exception as error:  # noqa: BLE001
     _GL_ERROR = error
@@ -98,6 +130,8 @@ def _caption(text: str) -> QLabel:
 
 
 class Hand3DPage(BasePage):
+    """Controlador del gemelo: crea la ventana 3D (twin_widget) y la de posturas (posture_widget)."""
+
     title = "Gemelo digital"
     subtitle = "Réplica virtual de la mano: se mueve a la vez que la mano real o la simulada"
     icon = "hand"
@@ -114,27 +148,11 @@ class Hand3DPage(BasePage):
         self._colors_applied = None
         self._thumb_user_until = 0.0
         self.model = None
+        self.view = None
         self.items = {}
 
-        root = QHBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(14)
-
-        # --- vista 3D con selector de cámara
-        cam_seg = Segmented(list(CAMERAS), stretch=False, tooltips=[f"Vista {name}" for name in CAMERAS])
-        self.cam_group = cam_seg.group
-        self.cam_group.idClicked.connect(lambda i: self.set_camera(list(CAMERAS)[i]))
-        view_card, view_layout = self.card("Vista 3D", [cam_seg])
-        problem = self._build_view(view_layout)
-        root.addWidget(view_card, 1)
-        root.addWidget(self._build_side_panel())
-
-        if problem:
-            msg = QLabel(problem)
-            msg.setWordWrap(True)
-            msg.setAlignment(Qt.AlignCenter)
-            view_layout.addWidget(msg, 1)
-            return
+        self.twin_widget = self._build_twin()
+        self.posture_widget = self._build_posture_widget()
 
         self.timer = QTimer(self)
         self.timer.setInterval(33)
@@ -145,17 +163,41 @@ class Hand3DPage(BasePage):
         self.on_theme_changed(ctx.theme)
         self.on_connection_changed(ctx.connected, "")
 
-    # ============================================================ vista 3D
-    def _build_view(self, layout) -> str | None:
-        if _GL_ERROR is not None:
-            return f"No se puede mostrar el 3D: falta PyOpenGL ({_GL_ERROR}).\nInstala con: pip install PyOpenGL"
-        try:
-            self.model = HandModel.load(config_file("mano3d.json"), ASSETS_DIR)
-        except Exception as error:  # noqa: BLE001
-            return f"No se pudo cargar el modelo 3D:\n{error}"
+    # ============================================================ ventana 3D
+    def _build_twin(self) -> QWidget:
+        box = QWidget()
+        box.setObjectName("transparent")
+        layout = QVBoxLayout(box)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
 
-        self.view = gl.GLViewWidget()
-        self.view.setMinimumSize(300, 300)
+        top = QHBoxLayout()
+        top.setSpacing(8)
+        cam_seg = Segmented(list(CAMERAS), stretch=False, tooltips=[f"Vista {name}" for name in CAMERAS])
+        self.cam_group = cam_seg.group
+        self.cam_group.idClicked.connect(lambda i: self.set_camera(list(CAMERAS)[i]))
+        top.addWidget(cam_seg)
+        top.addStretch(1)
+        layout.addLayout(top)
+
+        problem = None
+        if _GL_ERROR is not None:
+            problem = f"No se puede mostrar el 3D: falta PyOpenGL ({_GL_ERROR}).\nInstala con: pip install PyOpenGL"
+        else:
+            try:
+                self.model = HandModel.load(config_file("mano3d.json"), ASSETS_DIR)
+            except Exception as error:  # noqa: BLE001
+                problem = f"No se pudo cargar el modelo 3D:\n{error}"
+        if problem:
+            msg = QLabel(problem)
+            msg.setWordWrap(True)
+            msg.setAlignment(Qt.AlignCenter)
+            layout.addWidget(msg, 1)
+            self._build_follow_bar(layout)
+            return box
+
+        self.view = HandGLView()
+        self.view.setMinimumSize(220, 150)
         # Raíz: centra el modelo y pone su eje Y (a lo largo de los dedos) hacia arriba.
         self.root_item = GLGraphicsItem()
         tr = pg.Transform3D()
@@ -173,7 +215,8 @@ class Hand3DPage(BasePage):
             self.items[name] = item
         self.set_camera("¾")
         layout.addWidget(self.view, 1)
-        legend = QHBoxLayout()  # leyenda en una línea: qué significa el azul y cómo se maneja la vista
+        self.view.setToolTip("Arrastrar: girar  ·  rueda: acercar  ·  botón central: desplazar")
+        legend = QHBoxLayout()  # leyenda: qué significa el azul + la postura estimada
         legend.setSpacing(6)
         dot = QLabel()
         dot.setPixmap(pixmap("record", HIGHLIGHT, 12))
@@ -181,61 +224,102 @@ class Hand3DPage(BasePage):
         moving = QLabel("Motor en marcha")
         moving.setObjectName("legend")
         legend.addWidget(moving)
-        legend.addStretch(1)
-        how = ElidedLabel("Arrastrar: girar  ·  rueda: acercar  ·  botón central: desplazar")
-        how.setObjectName("legend")
-        how.setToolTip(how.text())
-        legend.addWidget(how)
+        legend.addSpacing(10)
+        self.pose_label = ElidedLabel("")  # "Índice 0 % · Medio 100 % · Anular 0 % · Pulgar 10°"
+        self.pose_label.setObjectName("legend")
+        self.pose_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.pose_label.setToolTip("% de cierre estimado de cada dedo y ángulo del pulgar")
+        legend.addWidget(self.pose_label, 1)
         layout.addLayout(legend)
-        return None
+        self._build_follow_bar(layout)
+        return box
+
+    def _build_follow_bar(self, layout: QVBoxLayout) -> None:
+        """Pie de la ventana 3D: seguir a la mano, % de cierre de cada dedo y, si se desactiva, deslizadores."""
+        bar = QHBoxLayout()
+        bar.setSpacing(10)
+        self.follow = QCheckBox("Seguir a la mano")
+        self.follow.setToolTip("Activado: el 3D imita a la mano (real o simulada) usando su telemetría.\n"
+                               "Desactivado: mueve tú los deslizadores para ver cualquier postura.")
+        self.follow.setChecked(True)
+        self.follow.toggled.connect(self._on_follow_toggled)
+        bar.addWidget(self.follow)
+        bar.addStretch(1)
+        if not hasattr(self, "pose_label"):  # sin 3D (falta OpenGL) la leyenda no existe
+            self.pose_label = ElidedLabel("")
+            self.pose_label.setObjectName("legend")
+            bar.addWidget(self.pose_label, 1)
+        sync_btn = self.button("", "refresh", "ghost", "Sincronizar: envía ESTADO y la mano dice qué dedos están "
+                                                        "abiertos o cerrados")
+        sync_btn.clicked.connect(lambda: self.ctx.send_command("ESTADO"))
+        bar.addWidget(sync_btn)
+        # solo mientras no llega telemetría (al conectar se activa sola)
+        self.stream_btn = self.button("Telemetría", "zap", "primary",
+                                      "Envía STREAM 1: la mano manda su estado ~20 veces/s y el 3D se mueve")
+        self.stream_btn.clicked.connect(lambda: self.ctx.send_command("STREAM 1"))
+        bar.addWidget(self.stream_btn)
+        self.ctx.hand_status_changed.connect(lambda *_: self._update_stream_button())
+        layout.addLayout(bar)
+
+        # deslizadores manuales (solo con "Seguir a la mano" desactivado)
+        self.manual_box = QWidget()
+        self.manual_box.setObjectName("transparent")
+        grid = QGridLayout(self.manual_box)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(2)
+        self.sliders = {}
+        rows = [(d, d.capitalize(), 100) for d in DEDOS] + [("pulgar", "Pulgar", 180)]
+        for i, (key, label, maximum) in enumerate(rows):
+            name = QLabel(label)
+            name.setObjectName("muted")
+            slider = QSlider(Qt.Horizontal)
+            slider.setRange(0, maximum)
+            if key == "pulgar":
+                slider.valueChanged.connect(self._slider_thumb)
+            else:
+                slider.valueChanged.connect(lambda v, d=key: self._slider_flex(d, v))
+            grid.addWidget(name, i // 2, (i % 2) * 2)
+            grid.addWidget(slider, i // 2, (i % 2) * 2 + 1)
+            self.sliders[key] = slider
+        grid.setColumnStretch(1, 1)
+        grid.setColumnStretch(3, 1)
+        self.thumb_slider = self.sliders.pop("pulgar")
+        self.thumb_slider.setValue(10)
+        note = QLabel("Sin sensor de posición: el % cerrado se estima integrando el PWM (config/mano3d.json).")
+        note.setObjectName("muted")
+        note.setWordWrap(True)
+        grid.addWidget(note, 2, 0, 1, 4)
+        self.manual_box.hide()
+        layout.addWidget(self.manual_box)
+        self._on_follow_toggled(True)
 
     def set_camera(self, name: str) -> None:
         if self.model is None:
             return
         azimuth, elevation = CAMERAS[name]
-        self.view.setCameraPosition(distance=self.model.size * 1.35, elevation=elevation, azimuth=azimuth)
+        self.view.setCameraPosition(distance=self.model.size * 1.25, elevation=elevation, azimuth=azimuth)
         self.view.opts["center"] = pg.Vector(0, 0, 0)
         self.cam_group.button(list(CAMERAS).index(name)).setChecked(True)
 
     def reset_camera(self) -> None:
         self.set_camera("¾")
 
-    # ======================================================= panel lateral
-    def _build_side_panel(self) -> QWidget:
-        card, layout = self.card()
-        card.setFixedWidth(300)
-        tabs = Segmented(("Control", "Postura"),
-                         tooltips=("Seguir a la mano y % de cierre de cada dedo",
-                                   "Gestos, mis posturas, dedos, pulgar y modo"))
-        self.side_tabs = tabs.group
-        self.side_stack = QStackedWidget()
-        layout.addWidget(tabs)
-        layout.addWidget(self.side_stack, 1)
-        self.side_stack.addWidget(self._build_control_tab())   # 0: Control
-        self.side_stack.addWidget(self._build_postura_tab())   # 1: Postura (gestos)
-        settings = QSettings(ORG_NAME, APP_NAME)
-        tab = int(settings.value("twin_tab", 0))
-        tab = tab if tab in (0, 1) else 0
-        self.side_tabs.button(tab).setChecked(True)
-        self.side_stack.setCurrentIndex(tab)
-        self.side_tabs.idClicked.connect(self.side_stack.setCurrentIndex)
-        self.side_tabs.idClicked.connect(lambda i: settings.setValue("twin_tab", i))
-        return card
-
-    # ---------------------------------------- Postura (galería de gestos)
-    def _build_postura_tab(self) -> QWidget:
+    # ===================================================== ventana Posturas
+    def _build_posture_widget(self) -> QWidget:
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setMinimumSize(240, 200)
         body = QWidget()
         body.setObjectName("transparent")
         cl = QVBoxLayout(body)
-        cl.setContentsMargins(0, 4, 4, 4)
+        cl.setContentsMargins(0, 2, 6, 4)
         cl.setSpacing(8)
         self._online_widgets: list[QWidget] = []  # se desactivan sin conexión
 
-        self.offline_hint = QLabel("Conecta la mano real o la simulación (panel Dispositivo) para controlarla.")
+        self.offline_hint = QLabel("Conecta la mano real o la simulación (ventana Dispositivo) para controlarla.")
         self.offline_hint.setObjectName("muted")
         self.offline_hint.setWordWrap(True)
         cl.addWidget(self.offline_hint)
@@ -326,7 +410,7 @@ class Hand3DPage(BasePage):
         # el botón marcado es el modo REAL de la mano (llega con el ACK), no el último pulsado
         modes_box = Segmented(("Manual", "Demo"), exclusive=False,
                               tooltips=("La mano solo obedece comandos",
-                                        "Recorre los 8 gestos automáticamente (modo AUTO)"))
+                                        "Bucle de exposiciones: recorre los 8 gestos automáticamente (modo AUTO)"))
         self.mode_group = modes_box.group
         self.mode_buttons = {"MANUAL": modes_box.button(0), "AUTO": modes_box.button(1)}
         for key, b in self.mode_buttons.items():
@@ -351,7 +435,7 @@ class Hand3DPage(BasePage):
         b.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
         b.setIconSize(QSize(46, 46))
         b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        b.setMinimumSize(120, 84)
+        b.setMinimumSize(100, 84)
         b.setToolTip(tooltip)
         b.setProperty("active", False)
         return b
@@ -389,7 +473,7 @@ class Hand3DPage(BasePage):
 
     def new_posture(self) -> None:
         from ..ui.posture_dialog import PostureDialog
-        dialog = PostureDialog(self.window(), self.ctx, self._current_pose(), "Nueva postura")
+        dialog = PostureDialog(self.posture_widget.window(), self.ctx, self._current_pose(), "Nueva postura")
         if dialog.exec():
             g = dialog.posture()
             g = Gesto(self.ctx.postures.unique_name(g.nombre), g.indice, g.medio, g.anular, g.pulgar)
@@ -397,7 +481,7 @@ class Hand3DPage(BasePage):
 
     def edit_posture(self, index: int) -> None:
         from ..ui.posture_dialog import PostureDialog
-        dialog = PostureDialog(self.window(), self.ctx, self.ctx.postures.items[index], "Editar postura")
+        dialog = PostureDialog(self.posture_widget.window(), self.ctx, self.ctx.postures.items[index], "Editar postura")
         if dialog.exec():
             g = dialog.posture()
             g = Gesto(self.ctx.postures.unique_name(g.nombre, skip=index), g.indice, g.medio, g.anular, g.pulgar)
@@ -407,7 +491,7 @@ class Hand3DPage(BasePage):
         from PySide6.QtWidgets import QMenu, QMessageBox
         store = self.ctx.postures
         g = store.items[index]
-        menu = QMenu(self)
+        menu = QMenu(self.posture_widget)
         menu.addAction("Enviar a la mano", lambda: self.send_posture(index)).setEnabled(self.ctx.connected)
         menu.addSeparator()
         menu.addAction("Editar…", lambda: self.edit_posture(index))
@@ -421,7 +505,8 @@ class Hand3DPage(BasePage):
         menu.addSeparator()
 
         def delete():
-            answer = QMessageBox.question(self.window(), "Eliminar postura", f"¿Eliminar la postura «{g.nombre}»?")
+            answer = QMessageBox.question(self.posture_widget.window(), "Eliminar postura",
+                                          f"¿Eliminar la postura «{g.nombre}»?")
             if answer == QMessageBox.Yes:
                 self._store(lambda: store.remove(index), f"Postura «{g.nombre}» eliminada.")
         menu.addAction("Eliminar", delete)
@@ -437,71 +522,9 @@ class Hand3DPage(BasePage):
         if done:
             self.ctx.notify(done, toast=True)
 
-    # ----------------------------- Control (seguimiento y postura manual)
-    def _build_control_tab(self) -> QWidget:
-        page = QWidget()
-        page.setObjectName("transparent")
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(0, 4, 0, 0)
-        layout.setSpacing(8)
-
-        self.follow = QCheckBox("Seguir a la mano")
-        self.follow.setToolTip("Activado: el 3D imita a la mano (real o simulada) usando su telemetría.\n"
-                               "Desactivado: mueve tú los deslizadores para ver cualquier postura.")
-        self.follow.setChecked(True)
-        self.follow.toggled.connect(self._on_follow_toggled)
-        layout.addWidget(self.follow)
-
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(10)
-        grid.setVerticalSpacing(4)
-        self.sliders, self.value_labels = {}, {}
-        rows = [(d, d.capitalize(), 100) for d in DEDOS] + [("pulgar", "Pulgar", 180)]
-        for i, (key, label, maximum) in enumerate(rows):
-            name = QLabel(label)
-            value = QLabel("—")
-            value.setObjectName("value")
-            value.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            slider = QSlider(Qt.Horizontal)
-            slider.setRange(0, maximum)
-            if key == "pulgar":
-                slider.valueChanged.connect(self._slider_thumb)
-            else:
-                slider.valueChanged.connect(lambda v, d=key: self._slider_flex(d, v))
-            grid.addWidget(name, i * 2, 0)
-            grid.addWidget(value, i * 2, 1)
-            grid.addWidget(slider, i * 2 + 1, 0, 1, 2)
-            if i < len(rows) - 1:
-                grid.setRowMinimumHeight(i * 2 + 1, 30)
-            self.sliders[key], self.value_labels[key] = slider, value
-        self.thumb_slider = self.sliders.pop("pulgar")
-        self.thumb_label = self.value_labels.pop("pulgar")
-        self.thumb_slider.setValue(10)
-        layout.addLayout(grid)
-        layout.addSpacing(4)
-
-        self.stream_btn = self.button("Activar telemetría", "zap", "primary",
-                                      "Envía STREAM 1: la mano manda su estado ~20 veces/s y el 3D se mueve")
-        self.stream_btn.clicked.connect(lambda: self.ctx.send_command("STREAM 1"))
-        sync_btn = self.button("Sincronizar", "refresh", "",
-                               "Envía ESTADO: la mano dice qué dedos están abiertos o cerrados")
-        sync_btn.clicked.connect(lambda: self.ctx.send_command("ESTADO"))
-        layout.addWidget(self.stream_btn)
-        layout.addWidget(sync_btn)
-
-        note = QLabel("La posición de los dedos se estima a partir del PWM de los motores: "
-                      "no hay sensor de posición. Ajustes en config/mano3d.json.")
-        note.setObjectName("muted")
-        note.setWordWrap(True)
-        layout.addWidget(note)
-        layout.addStretch(1)
-        self._on_follow_toggled(True)
-        return page
-
     # ====================================================== entradas
     def _on_follow_toggled(self, following: bool) -> None:
-        for s in [*self.sliders.values(), self.thumb_slider]:
-            s.setEnabled(not following)
+        self.manual_box.setVisible(not following)
         if not following:  # los deslizadores parten de la postura actual
             for d, s in self.sliders.items():
                 s.setValue(round(self.flex[d] * 100))
@@ -544,8 +567,6 @@ class Hand3DPage(BasePage):
             b.setChecked(key == mode)
 
     def on_message(self, msg) -> None:
-        if self.model is None:
-            return
         if msg.kind is MessageKind.DATA:
             for d in DEDOS:
                 if d in msg.values:
@@ -557,9 +578,10 @@ class Hand3DPage(BasePage):
             scale = getattr(self.ctx, "time_scale", 1.0)  # reproducción de sesiones a 2x, 4x...
             dt = 0.0 if self._last_data is None else min((now - self._last_data) * scale, 0.25)
             self._last_data = now
+            close_time = self.model.close_time_s if self.model is not None else 1.5
             for d in DEDOS:
                 if d in msg.values:  # PWM con signo: + abre, − cierra
-                    delta = -msg.values[d] / 255 * dt / self.model.close_time_s
+                    delta = -msg.values[d] / 255 * dt / close_time
                     self.flex[d] = min(max(self.flex[d] + delta, 0.0), 1.0)
             if "pulgar" in msg.values:
                 self.thumb_target = msg.values["pulgar"]
@@ -576,15 +598,17 @@ class Hand3DPage(BasePage):
             except ValueError:
                 pass
 
+    def _update_stream_button(self) -> None:
+        self.stream_btn.setVisible(self.ctx.connected and not self.ctx.replaying and self.ctx.data_rate == 0)
+
     def on_connection_changed(self, connected: bool, info: str) -> None:
-        if self.model is None:
-            return
         self.stream_btn.setEnabled(connected)
+        self._update_stream_button()
         for w in self._online_widgets:
             w.setEnabled(connected)
         self.offline_hint.setText("Reproduciendo una sesión grabada: los controles se activan al cerrarla."
                                   if self.ctx.replaying else
-                                  "Conecta la mano real o la simulación (panel Dispositivo) para controlarla.")
+                                  "Conecta la mano real o la simulación (ventana Dispositivo) para controlarla.")
         self.offline_hint.setVisible(not connected)
         self._last_data = None
         if not connected:
@@ -601,18 +625,23 @@ class Hand3DPage(BasePage):
     def _tick(self) -> None:
         now = time.monotonic()
         dt, self._last_tick = now - self._last_tick, now
-        step = self.model.thumb_speed * dt  # el servo no es instantáneo
+        speed = self.model.thumb_speed if self.model is not None else 300.0
+        step = speed * dt  # el servo no es instantáneo
         self.thumb_now += float(np.clip(self.thumb_target - self.thumb_now, -step, step))
 
         following = self.follow.isChecked()
+        parts = []
         for d in DEDOS:
             pct = round(self.flex[d] * 100)
-            self.value_labels[d].setText(f"{pct} % cerrado")
+            parts.append(f"{d.capitalize()} {pct} %")
             if following:  # el deslizador muestra la estimación, sin disparar cambios
                 self.sliders[d].blockSignals(True)
                 self.sliders[d].setValue(pct)
                 self.sliders[d].blockSignals(False)
-        self.thumb_label.setText(f"{self.thumb_now:.0f}°")
+        parts.append(f"Pulgar {self.thumb_now:.0f}°")
+        text = "  ·  ".join(parts)
+        if text != self.pose_label.text():
+            self.pose_label.setText(text)
         if following:
             self.thumb_slider.blockSignals(True)
             self.thumb_slider.setValue(round(self.thumb_now))
@@ -623,7 +652,7 @@ class Hand3DPage(BasePage):
             self.thumb_ctrl.blockSignals(False)
             self.thumb_value.setText(f"{round(self.thumb_target)}°")
 
-        if not self.isVisible():
+        if self.model is None or not self.view.isVisible():
             return
         self._apply_colors()
         state = (tuple(round(self.flex[d], 3) for d in DEDOS), round(self.thumb_now, 1))
@@ -652,10 +681,9 @@ class Hand3DPage(BasePage):
         self.items["pulgar"].setColor(tuple(mix) + (1.0,))
 
     def on_theme_changed(self, theme: str) -> None:
-        if self.model is None:
-            return
         p = PALETTES[theme]
-        self.view.setBackgroundColor(p["inset"])
+        if self.view is not None:
+            self.view.setBackgroundColor(p["inset"])
         for i, card in enumerate(self.gesture_cards):
             card.setIcon(self._gesture_icon(GESTOS[i], p))
         for card, g in zip(self.posture_cards, self.ctx.postures.items):

@@ -1,24 +1,33 @@
-"""Ventana principal.
+"""Ventana principal: un espacio de trabajo por ventanas.
 
-┌──────────────┬──────────────────────────────────────────────────────────┐
-│ ▣ BIOMEC     │ [▣] Título                   ● Estado  [⏺][⟲] │ [Parar] │
-│   Centro…    │     Descripción                                           │
-│ NAVEGACIÓN   │ [ franja de simulación / barra de reproducción ]          │
-│ ▸ Gemelo dig.│ ┌──────────────────────────────┬─────────────┬─────────┐ │
-│ ▸ Gráficas   │ │           página             │ Comandos    │Asistente│ │
-│ ▸ Entrenam.  │ └──────────────────────────────┴─────────────┴─────────┘ │
-│ HERRAMIENTAS │ ┌ Consola (plegable, en todas las pestañas) ────────────┐ │
-│ DISPOSITIVO  │ └────────────────────────────────────────────────────────┘ │
-│ ☀ ⌨ ⓘ  v0.2  │                                    avisos flotantes ↗    │
-└──────────────┴──────────────────────────────────────────────────────────┘
-Atajos: Ctrl+1…3 pestañas · Ctrl+J consola · Ctrl+K paleta · Ctrl+R grabar · Ctrl+O reproducir.
+┌ rail ─┐┌─────────────────────────────────────────────────────────────────────────┐
+│ ▣ BIO ││ [▣] Ensayo                 [Ventanas ▾]   ● Estado  [⏺][⟲][🎤] │ [Parar] │
+│       ││     Gráficas, Gemelo digital, Posturas y Consola                         │
+│ VENT. ││ [ franja de simulación / barra de reproducción ]                         │
+│ ▸ Gem ││ ┌ Dispositivo ┐ ┌ Gráficas ─────────────────┐ ┌ Gemelo digital ───────┐ │
+│ ▸ Pos ││ │             │ │                           │ │                       │ │
+│ ▸ Grá ││ ├ Posturas ───┤ │                           │ │                       │ │
+│ ▸ Ent ││ │             │ └───────────────────────────┘ └───────────────────────┘ │
+│ HERR. ││ │             │ ┌ Consola ────────────────────────────────────────────┐ │
+│ ▸ Con ││ │             │ │                                                     │ │
+│ ...   ││ └─────────────┘ └─────────────────────────────────────────────────────┘ │
+│ ☀ ⌨ ⓘ ││                                                      avisos flotantes ↗ │
+└───────┘└─────────────────────────────────────────────────────────────────────────┘
+
+Cada parte (gemelo, posturas, gráficas, entrenamiento, visor y analizador EMG, consola, comandos, asistente,
+dispositivo) es una ventana (ui/docks.py): se muestra u oculta desde la barra lateral o el menú Ventanas, se arrastra
+por su título para recolocarla, agruparla en pestañas o sacarla flotante. Hay espacios predefinidos
+(Demostración, Ensayo, Entrenamiento, Todo) y el último reparto se recuerda al cerrar.
+Atajos: Ctrl+1…7 ventanas · Ctrl+B barra lateral · Ctrl+K paleta · Ctrl+R grabar · Ctrl+O reproducir.
 """
 
-from PySide6.QtCore import QSettings, QSize, Qt, QTimer, QUrl
-from PySide6.QtGui import QDesktopServices, QIcon, QKeySequence, QShortcut
+import json
+
+from PySide6.QtCore import QByteArray, QSettings, QSize, Qt, QTimer, QUrl
+from PySide6.QtGui import QDesktopServices, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QButtonGroup, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPushButton, QSplitter,
-    QStackedWidget, QVBoxLayout, QWidget,
+    QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow, QMenu, QMessageBox, QPushButton, QTabWidget,
+    QVBoxLayout, QWidget,
 )
 
 from .. import APP_NAME, APP_VERSION, ORG_NAME
@@ -30,32 +39,54 @@ from ..paths import asset, documents_dir
 from .connection_bar import ConnectionBar
 from .context import LATENCY_GOOD_MS, LATENCY_LIMIT_MS, AppContext, latency_level
 from .dialogs import AboutDialog, ShortcutsDialog, VoiceHelpDialog
-from .icons import app_icon, icon, logo_badge, nav_icon, pixmap
+from .docks import Dock, Rail
+from .icons import app_icon, icon, logo_badge, pixmap
 from .palette import CommandPalette, PaletteAction
 from .player import PlayerBar, SessionPlayer, fmt_time
 from .theme import PALETTES, stylesheet
+from .updates import UpdateController, UpdateDialog
 from .voice import VoiceController
 from .widgets import ElidedLabel, ToastHost, style_titlebar
 
 HEADER_H = 32  # altura común de los controles de la cabecera
+RAIL_AUTO_WIDTH = 1380  # por debajo de este ancho la barra lateral se pliega sola (modo automático)
+PRESETS = ("Demostración", "Ensayo", "Entrenamiento", "Todo")
+CUSTOM = "Espacio personalizado"
+
+# ventanas: clave, título, icono, tamaño mínimo, atajo
+WINDOWS = [   # (clave, título, icono, (ancho mínimo, —), atajo): el alto mínimo lo decide el contenido
+    ("gemelo", "Gemelo digital", "hand", (270, 0), "Ctrl+1"),
+    ("posturas", "Posturas", "grid", (270, 0), "Ctrl+2"),
+    ("graficas", "Gráficas", "activity", (420, 0), "Ctrl+3"),
+    ("entrenamiento", "Entrenamiento", "brain", (480, 0), "Ctrl+4"),
+    ("visor_emg", "Visor EMG", "waveform", (520, 0), "Ctrl+6"),
+    ("analizador_emg", "Analizador EMG", "chart", (560, 0), "Ctrl+7"),
+    ("consola", "Consola", "terminal", (360, 0), "Ctrl+J"),
+    ("comandos", "Comandos", "list", (300, 0), "Ctrl+Mayús+K"),
+    ("asistente", "Asistente IA", "sparkles", (320, 0), "Ctrl+I"),
+    ("dispositivo", "Dispositivo", "plug", (230, 0), "Ctrl+5"),
+]
+TOOLS = {"consola", "comandos", "asistente", "dispositivo"}
+VOICE_WINDOWS = ("Gemelo digital", "Posturas", "Gráficas", "Entrenamiento")
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, ctx: AppContext, page_classes, console_cls=None, commands_cls=None, assistant_cls=None):
+    def __init__(self, ctx: AppContext, *_ignored, **_kw):
         super().__init__()
-        if console_cls is None or commands_cls is None or assistant_cls is None:
-            from ..pages import ASSISTANT_PANEL, COMMANDS_PANEL, CONSOLE_PANEL
-            console_cls = console_cls or CONSOLE_PANEL
-            commands_cls = commands_cls or COMMANDS_PANEL
-            assistant_cls = assistant_cls or ASSISTANT_PANEL
+        from ..pages import (AssistantPanel, CommandsPanel, ConsolePanel, EmgAnalyzerPanel, EmgPage, EmgViewerPanel,
+                             GraphPanel, Hand3DPage)
         self.ctx = ctx
         self.settings = QSettings(ORG_NAME, APP_NAME)
         ctx.theme = self.settings.value("theme", "dark")
+        self._preset = self.settings.value("workspace/preset", "Ensayo")
+        self._rail_mode = self.settings.value("sidebar/mode", "auto")  # auto | expanded | collapsed | hidden
+        self._graph_n = 1
+        self._applying = False  # mientras se reparte un espacio predefinido no cuenta como "personalizado"
 
         self.setWindowTitle(f"{ORG_NAME} · {APP_NAME}")
         self.setWindowIcon(app_icon())
-        self.resize(1320, 840)
-        self.setMinimumSize(1040, 720)
+        self.resize(1360, 860)
+        self.setMinimumSize(980, 640)
         geometry = self.settings.value("geometry")
         if geometry is not None:
             self.restoreGeometry(geometry)
@@ -66,113 +97,20 @@ class MainWindow(QMainWindow):
         outer.setSpacing(0)
 
         # ================= barra lateral =================
-        sidebar = QWidget()
-        sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(262)
-        side = QVBoxLayout(sidebar)
-        side.setContentsMargins(14, 18, 14, 14)
-        side.setSpacing(4)
-
-        brand = QHBoxLayout()
-        brand.setSpacing(10)
-        self.badge = QLabel()
-        self.badge.setFixedSize(40, 40)
-        self.badge.setAlignment(Qt.AlignCenter)
-        brand.addWidget(self.badge)
-        names = QVBoxLayout()
-        names.setSpacing(0)
-        name = QLabel("BIOMEC UMA")
-        name.setObjectName("brandName")
-        sub = QLabel("Centro de control")
-        sub.setObjectName("brandSub")
-        names.addWidget(name)
-        names.addWidget(sub)
-        brand.addLayout(names, 1)
-        side.addLayout(brand)
-        side.addSpacing(22)
-
-        nav_label = QLabel("NAVEGACIÓN")
-        nav_label.setObjectName("sectionLabel")
-        side.addWidget(nav_label)
-        side.addSpacing(4)
-
-        self.stack = QStackedWidget()
-        self.nav_group = QButtonGroup(self)
-        self.pages = {}
-        self.nav_buttons = []
-        for index, page_cls in enumerate(page_classes):
-            page = page_cls(ctx)
-            self.stack.addWidget(page)
-            self.pages[page.title] = page
-            button = QPushButton(f"  {page.title}")
-            button.setObjectName("navButton")
-            button.setCheckable(True)
-            button.setIconSize(QSize(18, 18))
-            if index < 9:
-                button.setToolTip(f"{page.title}  (Ctrl+{index + 1})")
-            self.nav_group.addButton(button, index)
-            self.nav_buttons.append((button, page))
-            side.addWidget(button)
-        self.nav_group.idClicked.connect(self._go_to)
-
-        side.addSpacing(16)
-        tools_label = QLabel("HERRAMIENTAS")
-        tools_label.setObjectName("sectionLabel")
-        side.addWidget(tools_label)
-        side.addSpacing(4)
-        self.console = console_cls(ctx)
-        self.commands = commands_cls(ctx)
-        self.assistant = assistant_cls(ctx)
-        self.console_btn = self._tool_button("Consola", "Desplegar / plegar la consola  (Ctrl+J)")
-        self.commands_btn = self._tool_button("Comandos", "Mostrar / ocultar el catálogo de comandos  (Ctrl+K)")
-        self.assistant_btn = self._tool_button("Asistente IA", "Pregunta o pide cosas en lenguaje natural  (Ctrl+I)")
-        self.console_btn.clicked.connect(lambda: self.console.set_expanded(not self.console.expanded))
-        self.commands_btn.clicked.connect(lambda checked: self.set_commands_visible(checked))
-        self.assistant_btn.clicked.connect(lambda checked: self.set_assistant_visible(checked))
-        side.addWidget(self.console_btn)
-        side.addWidget(self.commands_btn)
-        side.addWidget(self.assistant_btn)
-
-        side.addStretch(1)
-        dev_label = QLabel("DISPOSITIVO")
-        dev_label.setObjectName("sectionLabel")
-        side.addWidget(dev_label)
-        side.addSpacing(4)
-        self.connection_bar = ConnectionBar(ctx.link, ctx)
-        side.addWidget(self.connection_bar)
-        side.addSpacing(10)
-
-        footer = QHBoxLayout()
-        footer.setSpacing(2)
-        self.theme_btn = QPushButton()
-        self.theme_btn.setObjectName("ghost")
-        self.theme_btn.setIconSize(QSize(16, 16))
-        self.theme_btn.clicked.connect(self.toggle_theme)
-        self.help_btn = QPushButton()
-        self.help_btn.setObjectName("ghost")
-        self.help_btn.setToolTip("Atajos de teclado (F1)")
-        self.help_btn.clicked.connect(self.show_shortcuts)
-        self.about_btn = QPushButton()
-        self.about_btn.setObjectName("ghost")
-        self.about_btn.setToolTip(f"Acerca de {APP_NAME} · v{APP_VERSION}")
-        self.about_btn.clicked.connect(self.show_about)
-        footer.addWidget(self.theme_btn)
-        footer.addWidget(self.help_btn)
-        footer.addWidget(self.about_btn)
-        footer.addStretch(1)
-        version = QLabel(f"v{APP_VERSION}")
-        version.setObjectName("version")
-        version.setToolTip(f"{APP_NAME} {APP_VERSION}")
-        footer.addWidget(version)
-        footer.addSpacing(6)
-        side.addLayout(footer)
-        outer.addWidget(sidebar)
+        self.rail = Rail(ctx)
+        self.rail.clicked.connect(self.toggle_dock)
+        self.rail.new_graph.connect(self.new_graph)
+        self.rail.collapse_toggled.connect(self._toggle_rail_width)
+        self.rail.theme_btn.clicked.connect(self.toggle_theme)
+        self.rail.help_btn.clicked.connect(self.show_shortcuts)
+        self.rail.about_btn.clicked.connect(self.show_about)
+        outer.addWidget(self.rail)
 
         # ================= zona principal =================
         main = QWidget()
         main_layout = QVBoxLayout(main)
-        main_layout.setContentsMargins(28, 22, 28, 22)
-        main_layout.setSpacing(14)
+        main_layout.setContentsMargins(22, 16, 22, 14)
+        main_layout.setSpacing(10)
 
         header = QHBoxLayout()
         header.setSpacing(0)
@@ -191,6 +129,17 @@ class MainWindow(QMainWindow):
         titles.addWidget(self.page_title)
         titles.addWidget(self.page_subtitle)
         header.addLayout(titles, 1)
+        header.addSpacing(12)
+        self.windows_btn = QPushButton("  Ventanas")
+        self.windows_btn.setObjectName("headerMenu")
+        self.windows_btn.setFixedHeight(HEADER_H)
+        self.windows_btn.setIconSize(QSize(15, 15))
+        self.windows_btn.setCursor(Qt.PointingHandCursor)
+        self.windows_btn.setToolTip("Mostrar u ocultar ventanas, abrir otra gráfica y elegir un espacio de trabajo")
+        self.windows_menu = QMenu(self)
+        self.windows_menu.aboutToShow.connect(self._fill_windows_menu)
+        self.windows_btn.setMenu(self.windows_menu)
+        header.addWidget(self.windows_btn, 0, Qt.AlignVCenter)
         header.addSpacing(16)
         self.voice_caption = ElidedLabel()  # lo que se va oyendo (solo mientras escucha)
         self.voice_caption.setObjectName("voiceCaption")
@@ -198,9 +147,25 @@ class MainWindow(QMainWindow):
         self.voice_caption.hide()
         header.addWidget(self.voice_caption, 0, Qt.AlignVCenter)
         header.addSpacing(10)
-        self.status_pill = QLabel()
+        # «Actualizar a X»: solo aparece cuando hay una versión nueva publicada
+        self.update_btn = QPushButton()
+        self.update_btn.setObjectName("updateButton")
+        self.update_btn.setIconSize(QSize(15, 15))
+        self.update_btn.setFixedHeight(HEADER_H)
+        self.update_btn.setCursor(Qt.PointingHandCursor)
+        self.update_btn.clicked.connect(self.show_update)
+        self.update_box = QWidget()  # botón + su separación: al ocultarlo no deja hueco
+        update_row = QHBoxLayout(self.update_box)
+        update_row.setContentsMargins(0, 0, 10, 0)
+        update_row.addWidget(self.update_btn)
+        self.update_box.hide()
+        header.addWidget(self.update_box, 0, Qt.AlignVCenter)
+        self.status_pill = QPushButton()
         self.status_pill.setObjectName("statusPill")
         self.status_pill.setFixedHeight(HEADER_H)
+        self.status_pill.setCursor(Qt.PointingHandCursor)
+        self.status_pill.setToolTip("Estado de la conexión. Clic: ventana Dispositivo (Ctrl+5)")
+        self.status_pill.clicked.connect(lambda: self.show_dock("dispositivo"))
         header.addWidget(self.status_pill, 0, Qt.AlignVCenter)
         header.addSpacing(10)
         self.rec_btn = QPushButton()
@@ -266,49 +231,78 @@ class MainWindow(QMainWindow):
         self.player_bar.setVisible(False)
         main_layout.addWidget(self.player_bar)
 
-        # página + panel de comandos (derecha) / consola (abajo)
-        self.hsplit = QSplitter(Qt.Horizontal)
-        self.hsplit.setHandleWidth(14)
-        self.hsplit.setChildrenCollapsible(False)
-        self.hsplit.addWidget(self.stack)
-        self.hsplit.addWidget(self.commands)
-        self.hsplit.addWidget(self.assistant)
-        self.hsplit.setStretchFactor(0, 1)
-        self.vsplit = QSplitter(Qt.Vertical)
-        self.vsplit.setHandleWidth(14)
-        self.vsplit.setChildrenCollapsible(False)
-        self.vsplit.addWidget(self.hsplit)
-        self.vsplit.addWidget(self.console)
-        self.vsplit.setStretchFactor(0, 1)
-        main_layout.addWidget(self.vsplit, 1)
+        # ================= espacio de trabajo (ventanas) =================
+        self.workspace = QMainWindow()
+        self.workspace.setObjectName("workspace")
+        self.workspace.setDockNestingEnabled(True)
+        self.workspace.setDockOptions(QMainWindow.AnimatedDocks | QMainWindow.AllowNestedDocks |
+                                      QMainWindow.AllowTabbedDocks | QMainWindow.GroupedDragging)
+        self.workspace.setTabPosition(Qt.AllDockWidgetAreas, QTabWidget.North)
+        self.workspace.setCorner(Qt.BottomLeftCorner, Qt.LeftDockWidgetArea)
+        self.workspace.setCorner(Qt.TopLeftCorner, Qt.LeftDockWidgetArea)
+        placeholder = QWidget()  # sin widget central: las ventanas ocupan todo el espacio
+        placeholder.setMaximumSize(0, 0)
+        self.workspace.setCentralWidget(placeholder)
+        main_layout.addWidget(self.workspace, 1)
         outer.addWidget(main, 1)
+        self.setCentralWidget(central)
 
-        self.commands.close_requested.connect(lambda: self.set_commands_visible(False))
-        self.assistant.close_requested.connect(lambda: self.set_assistant_visible(False))
-        self.console.expanded_changed.connect(self._on_console_expanded)
-        ctx.prefill_command.connect(lambda _t: None if self.console.expanded else self.console.set_expanded(True))
-        QShortcut(QKeySequence("Ctrl+J"), self, activated=lambda: self.console.set_expanded(not self.console.expanded))
-        QShortcut(QKeySequence("Ctrl+Shift+K"), self, activated=self._toggle_commands_shortcut)
+        # --- contenido de las ventanas
+        self.twin = Hand3DPage(ctx)
+        self.console = ConsolePanel(ctx)
+        self.commands = CommandsPanel(ctx)
+        self.assistant = AssistantPanel(ctx)
+        self.emg = EmgPage(ctx)
+        self.emg_viewer = EmgViewerPanel(ctx)
+        self.emg_analyzer = EmgAnalyzerPanel(ctx)
+        self.connection_bar = ConnectionBar(ctx.link, ctx)
+        self.connection_bar.setObjectName("transparent")  # la ventana ya es la tarjeta
+        self.graph_panels: dict[str, GraphPanel] = {}
+        self.docks: dict[str, Dock] = {}
+        widgets = {
+            "gemelo": self.twin.twin_widget, "posturas": self.twin.posture_widget,
+            "entrenamiento": self.emg, "visor_emg": self.emg_viewer, "analizador_emg": self.emg_analyzer,
+            "consola": self.console, "comandos": self.commands, "asistente": self.assistant,
+            "dispositivo": self.connection_bar,
+        }
+        self.rail.add_section("Ventanas")
+        for key, title, icon_name, min_size, shortcut in WINDOWS:
+            if key == "graficas":
+                self._add_graph("graficas", None, "Gráficas", min_size)
+            else:
+                self._add_dock(key, title, icon_name, widgets[key], min_size,
+                               plain=key in ("entrenamiento", "visor_emg", "analizador_emg"), top=key == "dispositivo")
+            if key == "entrenamiento":
+                self.rail.add_section("EMG")
+            elif key == "consola":
+                self.rail.add_section("Herramientas")
+            self.rail.add_entry(key, title, icon_name, tool=key in TOOLS, shortcut=shortcut)
+            if key == "graficas":
+                self.rail.add_new_graph()
+            seq = shortcut.replace("Mayús", "Shift")
+            QShortcut(QKeySequence(seq), self, activated=lambda k=key: self.toggle_dock(k, focus=True))
+        self.docks["gemelo"].visibilityChanged.connect(lambda v: v and self.twin.on_shown())
+
+        ctx.prefill_command.connect(lambda _t: self.show_dock("consola"))
+        ctx.analyze_emg_file.connect(lambda _path: self.show_dock("analizador_emg"))
+        QShortcut(QKeySequence("Ctrl+B"), self, activated=self.toggle_rail)
+        QShortcut(QKeySequence("Ctrl+Shift+G"), self, activated=self.new_graph)
         self.palette = CommandPalette(self)
         QShortcut(QKeySequence("Ctrl+K"), self, activated=self.palette.open_palette)
         QShortcut(QKeySequence("Ctrl+P"), self, activated=self.palette.open_palette)
         QShortcut(QKeySequence("Esc"), self, activated=self.emergency_stop)
         QShortcut(QKeySequence("F1"), self, activated=self.show_shortcuts)
         QShortcut(QKeySequence("Ctrl+R"), self, activated=self.toggle_recording)
-        QShortcut(QKeySequence("Ctrl+I"), self, activated=self._toggle_assistant_shortcut)
         QShortcut(QKeySequence("Ctrl+O"), self, activated=lambda: self.open_session())
         self.space_shortcut = QShortcut(QKeySequence("Space"), self, activated=self.player.toggle)
         self.space_shortcut.setEnabled(False)  # solo mientras se reproduce una sesión
         for n in range(1, len(GESTOS) + 1):
             QShortcut(QKeySequence(f"Alt+{n}"), self, activated=lambda n=n: self.send_gesture(n))
-        for i in range(min(self.stack.count(), 9)):
-            QShortcut(QKeySequence(f"Ctrl+{i + 1}"), self, activated=lambda i=i: self._go_to(i))
-        self.setCentralWidget(central)
-        self.toasts = ToastHost(central, main, lambda: self.ctx.theme, top=78)
+        self.toasts = ToastHost(central, self.workspace, lambda: self.ctx.theme, top=6)
         ctx.toast.connect(self.toasts.show)
 
         # control por voz (sin internet)
-        self.voice = VoiceController(ctx, [page.title for _b, page in self.nav_buttons])
+        self.voice = VoiceController(ctx, list(VOICE_WINDOWS))
         self.voice.listening_changed.connect(lambda _l: self._update_voice_button())
         self.voice.ready.connect(self._on_voice_ready)
         self.voice.partial.connect(lambda text: self.voice_caption.setText(f"«{text}…»"))
@@ -316,6 +310,15 @@ class MainWindow(QMainWindow):
         self.voice.error.connect(self._on_voice_error)
         self._voice_real_ok = False
         QShortcut(QKeySequence("Ctrl+M"), self, activated=self.toggle_voice)
+
+        # actualizaciones (GitHub Releases): solo en la app instalada con el instalador
+        self.updates = UpdateController()
+        self.updates.found.connect(self._on_update_found)
+        self.updates.up_to_date.connect(self._on_up_to_date)
+        self.updates.failed.connect(self._on_update_failed)
+        self._manual_update_check = False
+        if self.updates.installed and self.updates.auto:
+            QTimer.singleShot(4000, lambda: self.check_updates(manual=False))
 
         self.hand_status_lbl = QLabel()
         self.latency_lbl = QLabel()
@@ -342,93 +345,298 @@ class MainWindow(QMainWindow):
         ctx.theme_changed.connect(lambda _t: self.apply_theme())
         self.apply_theme()
         self._on_mode_changed(self.connection_bar.simulated)
-        self._go_to(int(self.settings.value("last_page", 0)) if self.stack.count() else 0)
-        self.set_commands_visible(self.settings.value("commands_visible", False, type=bool))
-        self.set_assistant_visible(self.settings.value("assistant_visible", False, type=bool))
-        self._on_console_expanded(self.console.expanded)
+        self._restore_workspace()
+        self._apply_rail_mode()
         self.statusBar().showMessage("Listo.  Ctrl+K: paleta de comandos · F1: atajos de teclado")
 
-    # ------------------------------------------------------- herramientas
-    def _tool_button(self, text: str, tooltip: str) -> QPushButton:
-        b = QPushButton(f"  {text}")
-        b.setObjectName("toolButton")  # activa = texto en color (no parece una página seleccionada)
-        b.setCheckable(True)
-        b.setToolTip(tooltip)
-        b.setIconSize(QSize(18, 18))
-        return b
+    # ================================================================ ventanas
+    def _add_dock(self, key: str, title: str, icon_name: str, widget: QWidget, min_size, plain: bool = False,
+                  top: bool = False) -> Dock:
+        dock = Dock(key, title, icon_name, widget, self.ctx, min_size, plain=plain, top=top)
+        self.workspace.addDockWidget(Qt.RightDockWidgetArea, dock)
+        dock.hide()
+        self.docks[key] = dock
+        dock.toggleViewAction().toggled.connect(lambda on, k=key: self._on_dock_toggled(k, on))
+        # lo que hace el usuario con la ventana (menú, cerrar, mover, sacar) convierte el espacio en personalizado
+        dock.toggleViewAction().triggered.connect(lambda _c: self._mark_custom())
+        dock.closed.connect(lambda _k: self._mark_custom())
+        dock.dockLocationChanged.connect(lambda _a: self._mark_custom())
+        dock.topLevelChanged.connect(lambda _f: self._mark_custom())
+        return dock
 
-    def set_commands_visible(self, visible: bool) -> None:
-        self.commands.setVisible(visible)
-        self.commands_btn.setChecked(visible)
-        self.settings.setValue("commands_visible", visible)
-        self._layout_drawers()
+    def _mark_custom(self) -> None:
+        if not self._applying and self._preset != CUSTOM:
+            self._set_preset(CUSTOM)
 
-    def set_assistant_visible(self, visible: bool) -> None:
-        self.assistant.setVisible(visible)
-        self.assistant_btn.setChecked(visible)
-        self.settings.setValue("assistant_visible", visible)
-        self._layout_drawers()
+    def _add_graph(self, key: str, keys, name: str, min_size=(440, 240)) -> Dock:
+        from ..pages import GraphPanel
+        panel = GraphPanel(self.ctx, keys, name)
+        panel.open_in_new.connect(lambda ks: self.new_graph(ks))
+        panel.keys_changed.connect(self._save_graphs)
+        self.graph_panels[key] = panel
+        dock = self._add_dock(key, name, "activity", panel, min_size)
+        if key != "graficas":
+            dock.closed.connect(self._remove_graph)
+        return dock
 
-    def _layout_drawers(self) -> None:
-        """Reparte el ancho entre la página y los paneles desplegables visibles (Comandos, Asistente)."""
-        total = max(self.hsplit.width(), 900)
-        commands = 380 if self.commands.isVisibleTo(self) else 0
-        assistant = 420 if self.assistant.isVisibleTo(self) else 0
-        self.hsplit.setSizes([max(total - commands - assistant, 320), commands, assistant])
+    def _remove_graph(self, key: str) -> None:
+        dock = self.docks.pop(key, None)
+        panel = self.graph_panels.pop(key, None)
+        if dock is None:
+            return
+        self.workspace.removeDockWidget(dock)
+        dock.deleteLater()
+        if panel is not None:
+            panel.timer.stop()
+        self._save_graphs()
+        self._update_header()
 
-    def _toggle_assistant_shortcut(self) -> None:
-        if self.assistant.isVisible() and self.assistant.input.hasFocus():
-            self.set_assistant_visible(False)
+    def new_graph(self, keys=None) -> None:
+        """Otra ventana de Gráficas, flotante, con las señales elegidas (o pedidas en un diálogo)."""
+        from ..pages.telemetry import SignalPicker
+        if not keys:
+            dialog = SignalPicker(self, self.ctx, [], "Señales de la gráfica nueva")
+            if dialog.exec() != QDialog.Accepted or not dialog.keys():
+                return
+            keys = dialog.keys()
+        self._graph_n += 1
+        key, name = f"grafica{self._graph_n}", f"Gráfica {self._graph_n}"
+        dock = self._add_graph(key, list(keys), name)
+        dock.setFloating(True)
+        dock.resize(640, 360)
+        anchor = self.workspace.mapToGlobal(self.workspace.rect().center())
+        dock.move(anchor.x() - 320 + 24 * (self._graph_n % 5), anchor.y() - 180 + 24 * (self._graph_n % 5))
+        dock.show()
+        dock.raise_()
+        self._save_graphs()
+        self._mark_custom()
+        self._update_header()
+
+    def _on_dock_toggled(self, key: str, visible: bool) -> None:
+        self.rail.set_checked(key, visible)
+        self._update_header()
+
+    def show_dock(self, key: str, focus: bool = False) -> None:
+        dock = self.docks.get(key)
+        if dock is None:
+            return
+        dock.show()
+        dock.raise_()
+        if dock.isFloating():
+            dock.activateWindow()
+        if focus:
+            self._focus_dock(key)
+
+    def toggle_dock(self, key: str, focus: bool = False) -> None:
+        dock = self.docks.get(key)
+        if dock is None:
+            return
+        if dock.isHidden() or dock.behind_tab():
+            self.show_dock(key, focus)
+            self._mark_custom()
         else:
-            self.set_assistant_visible(True)
+            dock.close()
+
+    def show_dock_by_title(self, title: str) -> None:
+        for key, dock in self.docks.items():
+            if dock.windowTitle() == title:
+                self.show_dock(key)
+                return
+
+    def _focus_dock(self, key: str) -> None:
+        if key == "consola":
+            self.console.focus_input()
+        elif key == "comandos":
+            self.commands.focus_search()
+        elif key == "asistente":
             self.assistant.focus_input()
 
-    def _toggle_commands_shortcut(self) -> None:
-        if self.commands.isVisible() and self.commands.search.hasFocus():
-            self.set_commands_visible(False)
+    def _visible_titles(self) -> list[str]:
+        return [d.windowTitle() for d in self.docks.values() if not d.isHidden()]
+
+    def _update_header(self) -> None:
+        titles = self._visible_titles()
+        self.page_title.setText(self._preset)
+        text = (", ".join(titles[:-1]) + " y " + titles[-1]) if len(titles) > 1 else (titles[0] if titles else
+                                                                                       "Sin ventanas: ábrelas desde la barra lateral o el menú Ventanas")
+        self.page_subtitle.setText(text)
+        self.page_subtitle.setToolTip("\n".join(titles))
+
+    def _fill_windows_menu(self) -> None:
+        menu = self.windows_menu
+        menu.clear()
+        for key, dock in self.docks.items():
+            action = dock.toggleViewAction()
+            action.setText(dock.windowTitle())
+            menu.addAction(action)
+        menu.addSeparator()
+        menu.addAction("Nueva gráfica…  (Ctrl+Mayús+G)", lambda: self.new_graph())
+        menu.addSeparator()
+        spaces = menu.addMenu("Espacio de trabajo")
+        for name in PRESETS:
+            act = spaces.addAction(name, lambda n=name: self.apply_preset(n))
+            act.setCheckable(True)
+            act.setChecked(name == self._preset)
+        menu.addAction("Barra lateral: mostrar / ocultar  (Ctrl+B)", self.toggle_rail)
+
+    # ------------------------------------------------------------ espacios
+    def apply_preset(self, name: str) -> None:
+        """Reparte las ventanas según un espacio predefinido.
+
+        Las gráficas extra («Nueva gráfica») no se tocan si están flotando; si estaban acopladas se ocultan
+        (se recuperan desde el menú Ventanas)."""
+        ws = self.workspace
+        D = {k: d for k, d in self.docks.items() if k in dict.fromkeys(w[0] for w in WINDOWS)}
+        self._applying = True
+        for key, dock in self.docks.items():
+            if key not in D and not dock.isFloating():
+                dock.hide()
+        for d in D.values():
+            d.setFloating(False)
+            ws.removeDockWidget(d)
+        L, R, H, V = Qt.LeftDockWidgetArea, Qt.RightDockWidgetArea, Qt.Horizontal, Qt.Vertical
+        # Todo va en dos columnas: la izquierda (Dispositivo arriba + otra ventana) y la derecha, con divisiones
+        # anidadas (la consola va dentro de la columna derecha, no en el área inferior: así se puede dar altura).
+        show: list[str]
+        tall = ws.height() or 700
+        dev_h = D["dispositivo"].sizeHint().height()
+        if name == "Demostración":
+            ws.addDockWidget(L, D["dispositivo"])
+            ws.addDockWidget(L, D["posturas"])
+            ws.addDockWidget(R, D["gemelo"])
+            show = ["dispositivo", "posturas", "gemelo"]
+            widths = ([D["posturas"], D["gemelo"]], [340, 900])
+            heights = ([D["dispositivo"], D["posturas"]], [dev_h, tall])
+        elif name == "Entrenamiento":
+            ws.addDockWidget(L, D["dispositivo"])
+            ws.addDockWidget(L, D["gemelo"])
+            ws.addDockWidget(R, D["entrenamiento"])
+            ws.splitDockWidget(D["entrenamiento"], D["consola"], V)
+            ws.tabifyDockWidget(D["entrenamiento"], D["visor_emg"])       # las herramientas EMG, en pestañas
+            ws.tabifyDockWidget(D["visor_emg"], D["analizador_emg"])
+            show = ["dispositivo", "gemelo", "entrenamiento", "consola", "visor_emg", "analizador_emg"]
+            widths = ([D["gemelo"], D["entrenamiento"]], [360, 900])
+            heights = ([D["dispositivo"], D["gemelo"], D["entrenamiento"], D["consola"]], [dev_h, tall, tall, 170])
+        elif name == "Todo":
+            ws.addDockWidget(L, D["dispositivo"])
+            ws.addDockWidget(L, D["posturas"])
+            ws.addDockWidget(R, D["graficas"])
+            ws.splitDockWidget(D["graficas"], D["gemelo"], H)        # primero las columnas…
+            ws.splitDockWidget(D["graficas"], D["consola"], V)       # …y la consola solo bajo Gráficas
+            ws.splitDockWidget(D["gemelo"], D["comandos"], V)
+            ws.tabifyDockWidget(D["comandos"], D["asistente"])
+            ws.tabifyDockWidget(D["graficas"], D["entrenamiento"])  # las dos grandes, en pestañas
+            show = ["dispositivo", "posturas", "graficas", "gemelo", "comandos", "asistente", "consola", "entrenamiento"]
+            widths = ([D["posturas"], D["graficas"], D["gemelo"]], [250, 620, 420])
+            heights = ([D["dispositivo"], D["posturas"], D["graficas"], D["consola"]], [dev_h, tall, tall, 200])
+        else:  # Ensayo
+            name = "Ensayo"
+            ws.addDockWidget(L, D["dispositivo"])
+            ws.addDockWidget(L, D["posturas"])
+            ws.addDockWidget(R, D["graficas"])
+            ws.splitDockWidget(D["graficas"], D["consola"], V)
+            ws.splitDockWidget(D["graficas"], D["gemelo"], H)
+            show = ["dispositivo", "posturas", "graficas", "gemelo", "consola"]
+            widths = ([D["posturas"], D["graficas"], D["gemelo"]], [250, 580, 480])
+            heights = ([D["dispositivo"], D["posturas"], D["graficas"], D["consola"]], [dev_h, tall, tall, 180])
+        self._preset = name
+        for key in D:   # las que no se ven siguen en el reparto (ocultas) para poder abrirlas después
+            if key not in show:
+                ws.addDockWidget(R, D[key])
+                D[key].hide()
+        for key in show:
+            D[key].show()
+        if name == "Todo":
+            D["graficas"].raise_()
+            D["comandos"].raise_()
+        elif name == "Entrenamiento":
+            D["entrenamiento"].raise_()
+        self._pending_sizes = (widths, heights)
+        self._size_docks()
+        QTimer.singleShot(0, self._size_docks)
+        self._applying = False
+        self._set_preset(name)
+        self._update_header()
+
+    def _size_docks(self) -> None:
+        sizes = getattr(self, "_pending_sizes", None)
+        if not sizes:
+            return
+        widths, heights = sizes
+        if widths:
+            self.workspace.resizeDocks(widths[0], widths[1], Qt.Horizontal)
+        if heights:
+            self.workspace.resizeDocks(heights[0], heights[1], Qt.Vertical)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        QTimer.singleShot(0, self._size_docks)  # el reparto de tamaños necesita la ventana ya en pantalla
+
+    def _set_preset(self, name: str) -> None:
+        self._preset = name
+        self.settings.setValue("workspace/preset", name)
+        self._update_header()
+
+    def _restore_workspace(self) -> None:
+        """El reparto de la última vez (incluidas las gráficas extra); si no hay o falla, el espacio Ensayo."""
+        try:
+            extra = json.loads(self.settings.value("workspace/graphs", "[]"))
+        except (TypeError, ValueError):
+            extra = []
+        for cfg in extra:
+            key = cfg.get("clave", "")
+            if key.startswith("grafica") and key not in self.docks:
+                n = int(key[7:]) if key[7:].isdigit() else self._graph_n + 1
+                self._graph_n = max(self._graph_n, n)
+                self._add_graph(key, cfg.get("claves") or None, cfg.get("nombre", f"Gráfica {n}"))
+                self.graph_panels[key].apply_config(cfg)
+        main_cfg = self.settings.value("workspace/main_graph", "")
+        if main_cfg:
+            try:
+                self.graph_panels["graficas"].apply_config(json.loads(main_cfg))
+            except (TypeError, ValueError):
+                pass
+        state = self.settings.value("workspace/state")
+        ok = False
+        self._applying = True
+        if isinstance(state, QByteArray) and not state.isEmpty():
+            ok = self.workspace.restoreState(state)
+        self._applying = False
+        if not ok or not self._visible_titles():
+            self.apply_preset(self._preset if self._preset in PRESETS else "Ensayo")
         else:
-            self.set_commands_visible(True)
-            self.commands.focus_search()
+            for key, dock in self.docks.items():
+                self.rail.set_checked(key, not dock.isHidden())
+            self._update_header()
 
-    def _on_console_expanded(self, expanded: bool) -> None:
-        self.console_btn.setChecked(expanded)
-        handle = self.vsplit.handle(1)
-        if expanded:
-            self.console.setMaximumHeight(16777215)
-            handle.setEnabled(True)
-            height = int(self.settings.value("console_height", 260))
-            QTimer.singleShot(0, lambda: self.vsplit.setSizes([max(self.vsplit.height() - height, 200), height]))
-        else:
-            if self.vsplit.sizes()[1] > 120:
-                self.settings.setValue("console_height", self.vsplit.sizes()[1])
-            self.console.setMaximumHeight(self.console.sizeHint().height())
-            handle.setEnabled(False)
-            # el divisor no reparte solo el espacio que deja la consola al plegarse: se le da a la página
-            QTimer.singleShot(0, self._fit_collapsed_console)
+    def _save_graphs(self) -> None:
+        extra = [dict(self.graph_panels[k].config(), clave=k) for k in self.graph_panels if k != "graficas"]
+        self.settings.setValue("workspace/graphs", json.dumps(extra, ensure_ascii=False))
+        self.settings.setValue("workspace/main_graph", json.dumps(self.graph_panels["graficas"].config(),
+                                                                   ensure_ascii=False))
 
-    def _fit_collapsed_console(self) -> None:
-        if not self.console.expanded:
-            h = self.console.sizeHint().height()
-            self.vsplit.setSizes([max(self.vsplit.height() - h, 200), h])
+    def _save_workspace(self) -> None:
+        self.settings.setValue("workspace/state", self.workspace.saveState())
+        self.settings.setValue("workspace/preset", self._preset)
+        self._save_graphs()
 
-    # ------------------------------------------------------------ navegación
-    def _go_to(self, index: int) -> None:
-        if not 0 <= index < self.stack.count():
-            index = 0
-        self.stack.setCurrentIndex(index)
-        self.nav_group.button(index).setChecked(True)
-        page = self.stack.currentWidget()
-        self.page_badge.setPixmap(pixmap(page.icon, PALETTES[self.ctx.theme]["accent_text"], 20))
-        self.page_title.setText(page.title)
-        self.page_subtitle.setText(page.subtitle)
-        self.page_subtitle.setToolTip(page.subtitle)
-        page.on_shown()
-        self.settings.setValue("last_page", index)
+    # --------------------------------------------------------- barra lateral
+    def _apply_rail_mode(self) -> None:
+        mode = self._rail_mode
+        self.rail.setVisible(mode != "hidden")
+        if mode == "auto":
+            self.rail.set_expanded(self.width() >= RAIL_AUTO_WIDTH)
+        elif mode in ("expanded", "collapsed"):
+            self.rail.set_expanded(mode == "expanded")
+        self.settings.setValue("sidebar/mode", mode)
 
-    def show_page(self, title: str) -> None:
-        page = self.pages.get(title)
-        if page is not None:
-            self._go_to(self.stack.indexOf(page))
+    def _toggle_rail_width(self) -> None:
+        self._rail_mode = "collapsed" if self.rail.expanded else "expanded"
+        self._apply_rail_mode()
+
+    def toggle_rail(self) -> None:
+        self._rail_mode = "auto" if self._rail_mode == "hidden" else "hidden"
+        self._apply_rail_mode()
 
     # ----------------------------------------------------------------- tema
     def toggle_theme(self) -> None:
@@ -440,27 +648,18 @@ class MainWindow(QMainWindow):
         p = PALETTES[theme]
         self._apply_qt_palette(p)
         self.setStyleSheet(stylesheet(theme))
-        self.badge.setStyleSheet(
+        self.rail.badge.setStyleSheet(
             f"background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {p['accent']}, stop:1 #1e3a8a);"
-            "border-radius: 11px;")
-        self.badge.setPixmap(logo_badge(30, "#ffffff", asset("biomec_logo_dark.png")))
+            "border-radius: 10px;")
+        self.rail.badge.setPixmap(logo_badge(27, "#ffffff", asset("biomec_logo_dark.png")))
+        self.rail.apply_theme(theme)
         style_titlebar(self, theme)
         self.sim_icon.setPixmap(pixmap("flask", p["sim_text"], 15))
-        page = self.stack.currentWidget()
-        if page is not None:
-            self.page_badge.setPixmap(pixmap(page.icon, p["accent_text"], 20))
-        for button, page in self.nav_buttons:
-            button.setIcon(nav_icon(page.icon, p["muted"], p["accent_text"]))
-        self.console_btn.setIcon(nav_icon("terminal", p["muted"], p["accent_text"]))
-        self.commands_btn.setIcon(nav_icon("list", p["muted"], p["accent_text"]))
-        self.assistant_btn.setIcon(nav_icon("sparkles", p["muted"], p["accent_text"]))
-        dark = theme == "dark"
-        self.theme_btn.setToolTip("Cambiar a modo claro" if dark else "Cambiar a modo oscuro")
-        self.theme_btn.setIcon(icon("sun" if dark else "moon", p["muted"], 16))
-        self.help_btn.setIcon(icon("keyboard", p["muted"], 16))
-        self.about_btn.setIcon(icon("info", p["muted"], 16))
+        self.page_badge.setPixmap(pixmap("layout", p["accent_text"], 20))
+        self.windows_btn.setIcon(icon("layout", p["muted"], 15))
         self.stop_btn.setIcon(icon("octagon", "#ffffff", 16))
         self.replay_btn.setIcon(icon("history", p["muted"], 16))
+        self.update_btn.setIcon(icon("download", p["accent_text"], 15))
         self._update_voice_button()
         self._update_rec_button()
         self._update_status_pill()
@@ -501,8 +700,9 @@ class MainWindow(QMainWindow):
         else:
             text, fg, bg = "●  Desconectado", p["muted"], p["hover"]
         self.status_pill.setText(text)
-        self.status_pill.setStyleSheet(f"color: {fg}; background: {bg}; border-radius: {HEADER_H // 2}px; "
-                                       "padding: 0 14px;")
+        self.status_pill.setStyleSheet(f"QPushButton {{ color: {fg}; background: {bg}; border: 0; "
+                                       f"border-radius: {HEADER_H // 2}px; padding: 0 14px; font-weight: 600; "
+                                       "font-size: 9pt; }}")
         self.stop_btn.setEnabled(link.is_connected)
         self._update_device_status()
 
@@ -696,7 +896,7 @@ class MainWindow(QMainWindow):
             if not self.ctx.send_command(action.value):
                 return
         elif action.kind == "page":
-            self.show_page(action.value)
+            self.show_dock_by_title(action.value)
         elif action.kind == "app":
             if (action.value == "grabar") != self.ctx.recording:
                 self.toggle_recording()
@@ -746,13 +946,21 @@ class MainWindow(QMainWindow):
         for g in ctx.postures.items:
             acts.append(PaletteAction(f"Postura · {g.nombre}", posture_command(g), "hand",
                                       lambda c=posture_command(g): ctx.send_command(c), "postura personalizada", on))
-        twin_page = self.pages.get("Gemelo digital")
-        if twin_page is not None and hasattr(twin_page, "new_posture"):
-            acts.append(PaletteAction("Nueva postura personalizada…", "Editor de posturas", "plus",
-                                      lambda: (self.show_page("Gemelo digital"), twin_page.new_posture()),
-                                      "crear postura agarre editor"))
-        for index, (button, page) in enumerate(self.nav_buttons):
-            acts.append(PaletteAction(f"Ir a {page.title}", "Pestaña", page.icon, lambda i=index: self._go_to(i)))
+        acts.append(PaletteAction("Nueva postura personalizada…", "Editor de posturas", "plus",
+                                  lambda: (self.show_dock("posturas"), self.twin.new_posture()),
+                                  "crear postura agarre editor"))
+        for key, dock in self.docks.items():
+            hidden = dock.isHidden()
+            acts.append(PaletteAction(f"{'Mostrar' if hidden else 'Ocultar'} ventana · {dock.windowTitle()}",
+                                      "Ventana", dock.icon_name, lambda k=key: self.toggle_dock(k, focus=True),
+                                      "ventana abrir cerrar mostrar ocultar"))
+        acts.append(PaletteAction("Nueva gráfica…", "Ctrl+Mayús+G", "activity", lambda: self.new_graph(),
+                                  "grafica ventana señales nueva"))
+        for name in PRESETS:
+            acts.append(PaletteAction(f"Espacio de trabajo · {name}", "Ventanas", "layout",
+                                      lambda n=name: self.apply_preset(n), "espacio reparto ventanas preset"))
+        acts.append(PaletteAction("Barra lateral: mostrar / ocultar", "Ctrl+B", "sidebar", self.toggle_rail,
+                                  "barra lateral menu plegar"))
         acts += [
             PaletteAction("Detener grabación" if ctx.recording else "Grabar sesión", "Ctrl+R", "record",
                           self.toggle_recording, "grabar sesion rec registro", not ctx.replaying),
@@ -778,15 +986,15 @@ class MainWindow(QMainWindow):
                           "datos graficas", on),
             PaletteAction("Sincronizar estado de la mano", "ESTADO", "refresh", lambda: ctx.send_command("ESTADO"),
                           "estado", on),
-            PaletteAction("Modo demo (recorrer gestos)", "AUTO", "play", lambda: ctx.send_command("AUTO"), "auto", on),
+            PaletteAction("Modo demo (recorrer gestos)", "AUTO", "play", lambda: ctx.send_command("AUTO"),
+                          "auto exposicion bucle demostracion", on),
             PaletteAction("Modo manual", "MANUAL", "pause", lambda: ctx.send_command("MANUAL"), "manual", on),
         ]
-        twin = self.pages.get("Gemelo digital")
-        if twin is not None and hasattr(twin, "set_camera"):
+        if self.twin.model is not None:
             from ..pages.hand3d import CAMERAS
             for name in CAMERAS:
                 acts.append(PaletteAction(f"Vista 3D: {name}", "Gemelo digital", "camera",
-                                          lambda n=name: (self.show_page("Gemelo digital"), twin.set_camera(n)),
+                                          lambda n=name: (self.show_dock("gemelo"), self.twin.set_camera(n)),
                                           "camara"))
         quick = {"PARAR", "AUTO", "MANUAL", "ESTADO", "GESTO"}
         for cmd in ctx.catalog:
@@ -799,20 +1007,114 @@ class MainWindow(QMainWindow):
                 acts.append(PaletteAction(cmd.name, f"{cmd.category} · enviar", "send",
                                           lambda c=cmd: ctx.send_command(c.name), cmd.description, on))
         acts += [
-            PaletteAction("Mostrar / ocultar consola", "Ctrl+J", "terminal",
-                          lambda: self.console.set_expanded(not self.console.expanded)),
-            PaletteAction("Mostrar / ocultar panel Comandos", "Ctrl+Shift+K", "list",
-                          lambda: self.set_commands_visible(not self.commands.isVisible())),
             PaletteAction("Preguntar al asistente IA", "Ctrl+I", "sparkles",
-                          lambda: (self.set_assistant_visible(True), self.assistant.focus_input()),
-                          "ia claude chat ayuda asistente"),
+                          lambda: self.show_dock("asistente", focus=True), "ia claude chat ayuda asistente"),
             PaletteAction("Cambiar a tema " + ("claro" if ctx.theme == "dark" else "oscuro"), "Apariencia",
                           "sun" if ctx.theme == "dark" else "moon", self.toggle_theme, "tema color"),
             PaletteAction("Atajos de teclado", "F1", "keyboard", self.show_shortcuts, "ayuda"),
             PaletteAction(f"Acerca de {APP_NAME}", f"v{APP_VERSION}", "info", self.show_about, "version licencias"),
+            PaletteAction("Buscar actualizaciones", f"v{APP_VERSION}", "download", lambda: self.check_updates(True),
+                          "actualizar version nueva descargar instalar"),
         ]
         return acts
 
+    # ------------------------------------------------------ actualizaciones
+    def check_updates(self, manual: bool = True) -> None:
+        if not self.updates.installed:
+            if manual:
+                QMessageBox.information(
+                    self, "Actualizaciones",
+                    "Esta copia no se instaló con el instalador (se ejecuta desde el código o desde dist), así que "
+                    "no se actualiza sola.\n\nEl instalador de la última versión está en GitHub → Releases.")
+            return
+        self._manual_update_check = manual
+        if manual:
+            self.statusBar().showMessage("Buscando actualizaciones en GitHub…", 5000)
+        self.updates.check()
+
+    def _on_update_found(self, release) -> None:
+        self.update_btn.setText(f"  Actualizar a {release.version}")
+        self.update_btn.setToolTip(f"Hay una versión nueva de {APP_NAME} ({release.version}; tienes la {APP_VERSION}).\n"
+                                   "Pulsa para ver las novedades e instalarla.")
+        self.update_box.show()
+        if self._manual_update_check:
+            self.show_update()
+        else:
+            self.toasts.show(f"Hay una versión nueva de {APP_NAME}: la {release.version}. "
+                             "Pulsa «Actualizar» arriba para ver las novedades.", "info")
+        self._manual_update_check = False
+
+    def _on_up_to_date(self) -> None:
+        if self._manual_update_check:
+            self.toasts.show(f"Tienes la última versión ({APP_VERSION}).", "ok")
+        self._manual_update_check = False
+
+    def _on_update_failed(self, text: str) -> None:
+        if self._manual_update_check:
+            self.ctx.notify(f"Actualizaciones: {text}", error=True)
+        else:  # al arrancar sin internet no se molesta con avisos
+            self.statusBar().showMessage(f"No se pudo buscar actualizaciones: {text}", 8000)
+        self._manual_update_check = False
+
+    def show_update(self) -> None:
+        release = self.updates.release
+        if release is None:
+            return
+        real_hand = self.ctx.connected and not self.ctx.simulated
+        if UpdateDialog(self, release, real_hand).exec() == QDialog.Accepted:
+            self._download_update(release)
+
+    def _download_update(self, release) -> None:
+        from PySide6.QtWidgets import QProgressDialog
+        label = f"Descargando la versión {release.version}…"
+        dialog = QProgressDialog(label, "Cancelar", 0, 100, self)
+        dialog.setWindowTitle("Actualizar")
+        dialog.setWindowModality(Qt.WindowModal)
+        dialog.setMinimumDuration(0)
+        dialog.setAutoClose(False)
+        dialog.setAutoReset(False)
+        dialog.setValue(0)
+        style_titlebar(dialog, self.ctx.theme)
+        dialog.canceled.connect(self.updates.cancel)
+
+        def progress(done: int, total: int) -> None:
+            if total:
+                dialog.setValue(int(done * 100 / total))
+                dialog.setLabelText(f"{label}  {done / 1e6:.0f} / {total / 1e6:.0f} MB")
+
+        def finished(path: str = "", error: str = "") -> None:
+            self.updates.progress.disconnect(progress)
+            self.updates.downloaded.disconnect(ok)
+            self.updates.download_failed.disconnect(failed)
+            dialog.close()
+            if error:
+                if "cancelada" not in error:
+                    self.ctx.notify(f"No se pudo actualizar: {error}", error=True)
+                return
+            self._install_update(path)
+
+        def ok(path: str) -> None:
+            finished(path=path)
+
+        def failed(error: str) -> None:
+            finished(error=error)
+
+        self.updates.progress.connect(progress)
+        self.updates.downloaded.connect(ok)
+        self.updates.download_failed.connect(failed)
+        self.updates.download()
+
+    def _install_update(self, path: str) -> None:
+        if self.ctx.connected and not self.ctx.simulated:
+            self.ctx.send_command("PARAR")  # que la mano no siga moviéndose mientras no hay app que la controle
+        try:
+            self.updates.install(path)
+        except OSError as error:
+            self.ctx.notify(f"No se pudo abrir el instalador: {error}", error=True)
+            return
+        self.close()  # el instalador espera a que la app termine de cerrarse, la actualiza y la reabre
+
+    # --------------------------------------------------------------- eventos
     def _status_from_message(self, msg) -> None:
         if msg.kind in (MessageKind.SYSTEM, MessageKind.ERROR, MessageKind.ACK):
             self.statusBar().showMessage(f"{msg.kind.value}  ·  {msg.text}", 8000)
@@ -823,14 +1125,20 @@ class MainWindow(QMainWindow):
         super().resizeEvent(event)
         if hasattr(self, "toasts"):
             self.toasts.relayout()
+        if getattr(self, "_rail_mode", "") == "auto":
+            self.rail.set_expanded(self.width() >= RAIL_AUTO_WIDTH)
 
     def closeEvent(self, event) -> None:
         self.voice.stop()
+        self.emg_viewer.shutdown()            # cierra el CSV que se esté grabando
+        self.ctx.emg_receiver.disconnect_port()
         if self.ctx.recording:
             self.ctx.stop_recording()
         self.player.close()
         self.settings.setValue("geometry", self.saveGeometry())
-        if self.console.expanded and self.vsplit.sizes()[1] > 120:
-            self.settings.setValue("console_height", self.vsplit.sizes()[1])
+        self._save_workspace()
         self.ctx.link.disconnect()
+        for dock in self.docks.values():  # las ventanas flotantes son ventanas aparte: se cierran con la app
+            if dock.isFloating():
+                dock.hide()
         event.accept()

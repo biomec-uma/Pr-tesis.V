@@ -1,21 +1,22 @@
-"""Consola (panel inferior, visible en todas las pestañas).
+"""Consola: ventana con el registro de mensajes y una línea para escribir comandos.
 
-Plegada:    [▸] Consola   última respuesta…                 [ escribir comando ] [Enviar]
-Desplegada: cabecera con opciones + registro completo + línea para escribir.
-Atajo: Ctrl+J pliega/despliega (lo gestiona la ventana principal).
+    ☐ Telemetría  ☑ Autodesplazar                      [Limpiar] [Guardar]
+    12:01:03.120  TX   GESTO 3
+    12:01:03.251  ACK  GESTO 3 Índice y anular
+    [ escribir comando: GESTO 3, ABRIR…        ] ☐ Sin validar [Enviar]
+
+Atajo: Ctrl+J muestra u oculta la ventana (lo gestiona la ventana principal). No hace falta leerlo
+todo: la telemetría se ve mejor en Gráficas y aquí está oculta salvo que se marque «Telemetría».
 """
 
 import html
 
-from PySide6.QtCore import QEvent, QSettings, QSize, QStringListModel, Qt, Signal
+from PySide6.QtCore import QEvent, QStringListModel, Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QCompleter, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit, QPushButton, QSizePolicy,
-    QVBoxLayout, QWidget,
+    QCheckBox, QCompleter, QFileDialog, QHBoxLayout, QLineEdit, QPlainTextEdit, QVBoxLayout,
 )
 
-from .. import APP_NAME, ORG_NAME
 from ..core.protocol import MessageKind
-from ..ui.icons import icon
 from ..ui.theme import PALETTES
 from .base import BasePage
 
@@ -36,54 +37,35 @@ _LABEL_WIDTH = 7
 class ConsolePanel(BasePage):
     title = "Consola"
     icon = "terminal"
-    expanded_changed = Signal(bool)
 
     def __init__(self, ctx):
         super().__init__(ctx)
-        self.settings = QSettings(ORG_NAME, APP_NAME)
         self._history: list[str] = []
         self._history_pos = 0
         self._plain_log: list[str] = []
+        self.setMinimumSize(360, 160)
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        card = QWidget()
-        card.setObjectName("card")
-        root.addWidget(card)
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(14, 10, 14, 12)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
 
-        # --- cabecera
+        # --- opciones
         head = QHBoxLayout()
         head.setSpacing(8)
-        self.toggle_btn = QPushButton()
-        self.toggle_btn.setObjectName("ghost")
-        self.toggle_btn.setIconSize(QSize(16, 16))
-        self.toggle_btn.setToolTip("Desplegar / plegar la consola (Ctrl+J)")
-        self.toggle_btn.clicked.connect(lambda: self.set_expanded(not self.expanded))
-        title = QLabel("Consola")
-        title.setObjectName("cardTitle")
-        self.last_line = QLabel()
-        self.last_line.setObjectName("muted")
-        self.last_line.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)  # no empuja al resto
         self.show_data = QCheckBox("Telemetría")
         self.show_data.setToolTip("Muestra también las líneas DATA (telemetría) y EMG (señales musculares):\n"
-                                  "pueden ser decenas por segundo")
+                                  "pueden ser decenas por segundo. Se ven mejor en Gráficas.")
         self.autoscroll = QCheckBox("Autodesplazar")
         self.autoscroll.setChecked(True)
         self.clear_btn = self.button("Limpiar", "trash", "ghost", "Borra el monitor (el registro guardable se conserva)")
         self.clear_btn.clicked.connect(self.clear)
         self.save_btn = self.button("Guardar", "download", "ghost", "Guarda todo el registro en un archivo .txt")
         self.save_btn.clicked.connect(self.save_log)
-        head.addWidget(self.toggle_btn)
-        head.addWidget(title)
-        head.addSpacing(6)
-        head.addWidget(self.last_line, 3)
+        head.addWidget(self.show_data)
+        head.addWidget(self.autoscroll)
         head.addStretch(1)
-        self._expanded_only = [self.show_data, self.autoscroll, self.clear_btn, self.save_btn]
-        for w in self._expanded_only:
-            head.addWidget(w)
+        head.addWidget(self.clear_btn)
+        head.addWidget(self.save_btn)
         layout.addLayout(head)
 
         # --- registro
@@ -91,7 +73,7 @@ class ConsolePanel(BasePage):
         self.view.setObjectName("log")
         self.view.setReadOnly(True)
         self.view.setMaximumBlockCount(3000)
-        self.view.setMinimumHeight(80)
+        self.view.setMinimumHeight(60)
         layout.addWidget(self.view, 1)
 
         # --- línea de envío
@@ -116,27 +98,6 @@ class ConsolePanel(BasePage):
 
         ctx.prefill_command.connect(self.prefill)
         self.on_connection_changed(ctx.connected, "")
-        self.expanded = self.settings.value("console_expanded", True, type=bool)
-        self.set_expanded(self.expanded, save=False)
-
-    # -------------------------------------------------------- plegar
-    def set_expanded(self, expanded: bool, save: bool = True) -> None:
-        self.expanded = expanded
-        self.view.setVisible(expanded)
-        for w in self._expanded_only:
-            w.setVisible(expanded)
-        self.last_line.setVisible(not expanded)
-        self._paint_toggle()
-        if save:
-            self.settings.setValue("console_expanded", expanded)
-        self.expanded_changed.emit(expanded)
-
-    def _paint_toggle(self) -> None:
-        self.toggle_btn.setIcon(icon("chevron_down" if self.expanded else "chevron_up",
-                                     PALETTES[self.ctx.theme]["muted"], 16))
-
-    def on_theme_changed(self, theme: str) -> None:
-        self._paint_toggle()
 
     # ---------------------------------------------------------------- envío
     def send(self) -> None:
@@ -183,9 +144,6 @@ class ConsolePanel(BasePage):
             return
         p = PALETTES[self.ctx.theme]
         color = p[color_key]
-        if not stream:  # resumen visible con la consola plegada
-            self.last_line.setText(f"{label}  {msg.text}")
-            self.last_line.setStyleSheet(f"color: {color if msg.kind is not MessageKind.TEXT else p['muted']};")
         pad = "&nbsp;" * (_LABEL_WIDTH - len(label))
         body_color = p["text"] if msg.kind in (MessageKind.TEXT, MessageKind.BRIDGE) else color
         self.view.appendHtml(

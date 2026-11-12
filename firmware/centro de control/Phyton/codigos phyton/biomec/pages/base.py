@@ -1,4 +1,4 @@
-"""Clase base de todas las páginas (pestañas de la barra lateral)."""
+"""Clase base del contenido de las ventanas (gemelo, gráficas, entrenamiento, consola…)."""
 
 from PySide6.QtCore import QSize
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget

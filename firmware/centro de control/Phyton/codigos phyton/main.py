@@ -15,7 +15,7 @@ from PySide6.QtWidgets import QApplication, QSplashScreen
 from biomec import APP_NAME, APP_VERSION, ORG_NAME
 from biomec.core.commands import CommandCatalog
 from biomec.core.serial_link import SerialLink
-from biomec.pages import PAGES
+from biomec.core.updates import APP_MUTEX
 from biomec.paths import config_file
 from biomec.ui.context import AppContext
 from biomec.ui.icons import app_icon, app_icon_pixmap
@@ -57,7 +57,8 @@ def selftest() -> int:
 
     lines, ok = [], True
     modules = ("numpy", "serial", "pyqtgraph", "pyqtgraph.opengl", "OpenGL.GL", "anthropic", "vosk",
-               "PySide6.QtMultimedia", "biomec.core.emg", "biomec.core.assistant", "biomec.core.voice", "biomec.pages")
+               "PySide6.QtMultimedia", "biomec.core.emg", "biomec.core.emg_analysis", "biomec.core.emg_receiver",
+               "biomec.core.assistant", "biomec.core.voice", "biomec.core.updates", "biomec.pages")
     for name in modules:
         try:
             importlib.import_module(name)
@@ -120,6 +121,9 @@ def micro_test() -> int:
     return 0 if result["bytes"] > 0 else 1
 
 
+_app_mutex = None
+
+
 def main() -> int:
     if "--selftest" in sys.argv:
         return selftest()
@@ -128,6 +132,9 @@ def main() -> int:
     if sys.platform == "win32":
         # Hace que Windows muestre nuestro icono en la barra de tareas (no el de Python).
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("BiomecUMA.Control")
+        # Existe mientras la app está abierta: el instalador espera a que desaparezca para actualizarla.
+        global _app_mutex
+        _app_mutex = ctypes.windll.kernel32.CreateMutexW(None, False, APP_MUTEX)
 
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
@@ -144,7 +151,7 @@ def main() -> int:
     catalog = CommandCatalog(config_file("commands.json"))
     ctx = AppContext(link, catalog)
 
-    window = MainWindow(ctx, PAGES)
+    window = MainWindow(ctx)
     window.show()
     splash.finish(window)
     ctx.notify(f"{APP_NAME} iniciada. {len(catalog.names())} comandos cargados.  Pulsa Ctrl+K para la paleta de comandos.")

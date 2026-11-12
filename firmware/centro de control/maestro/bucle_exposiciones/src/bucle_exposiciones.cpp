@@ -9,8 +9,11 @@
 //  - Para descartar el hardware: si con firmware/mano no se mueve y con
 //    este sí, el problema está en el firmware.
 //  firmware/mano hace lo mismo en modo AUTO (al encender) y además
-//  obedece a la app.  Arduino IDE: "ESP32 Dev Module", ESP32Servo >= 3.0
+//  obedece a la app.
+//  PlatformIO: abre en VS Code la carpeta de este firmware (la que tiene
+//  el platformio.ini). Al subir, mantén pulsado BOOT en la WROOM.
 // =====================================================================
+#include <Arduino.h>
 #include <ESP32Servo.h> //Para el servo
 #define N 8 // Número de posiciones
 hw_timer_t*timer=NULL;

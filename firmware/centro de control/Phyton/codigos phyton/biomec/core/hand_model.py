@@ -57,6 +57,19 @@ def _circle_intersection(c0, r0, c1, r1, prev):
     return s1 if np.linalg.norm(s1 - prev) <= np.linalg.norm(s2 - prev) else s2
 
 
+def frustum(fov_deg: float, distance: float, width: float, height: float) -> tuple[float, ...]:
+    """Límites (left, right, bottom, top, near, far) de la proyección de la vista 3D.
+
+    El campo de visión vertical es fijo: la escala de la mano depende solo del ALTO de la vista.
+    (pyqtgraph fija el horizontal, y al abrir o cerrar un panel lateral cambiaba el ancho y la
+    mano se veía a otra escala.)
+    """
+    near, far = distance * 0.001, distance * 1000.0
+    top = near * float(np.tan(0.5 * np.radians(fov_deg)))
+    right = top * width / max(height, 1.0)
+    return -right, right, -top, top, near, far
+
+
 def rotation_x(pivot_yz, angle: float, new_pivot_yz=None) -> np.ndarray:
     """Matriz 4x4: gira `angle` rad alrededor del eje X que pasa por pivot y lo lleva a new_pivot."""
     py, pz = pivot_yz

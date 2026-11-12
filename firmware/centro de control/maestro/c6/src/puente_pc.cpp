@@ -13,9 +13,12 @@
 //  DevKitC del puente o la Waveshare C6-Zero del receptor del equipo
 //  (las dos tienen el LED RGB en el GPIO 8).
 //
-//  Arduino IDE: placa "ESP32C6 Dev Module", core esp32 >= 3.0
-//  Herramientas -> "USB CDC On Boot: Enabled" (para usar el USB nativo).
+//  PlatformIO: abre en VS Code la carpeta de este firmware (la que tiene
+//  el platformio.ini). Entorno "devkitc" = DevKitC del puente, "c6zero" =
+//  C6-Zero del receptor del equipo. Ya trae "USB CDC On Boot" activado,
+//  necesario para el USB nativo.
 // =====================================================================
+#include <Arduino.h>
 #include <WiFi.h>
 #include <esp_now.h>
 #include <esp_wifi.h>

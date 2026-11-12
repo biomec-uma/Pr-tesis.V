@@ -49,6 +49,7 @@ PLOT_COLORS = ["#3b82f6", "#f97316", "#10b981", "#e11d48", "#a855f7", "#eab308",
 def stylesheet(theme: str) -> str:
     p = PALETTES[theme]
     check = qss_icon_file("check", "#ffffff", 3)
+    check_accent = qss_icon_file("check", p["accent"], 3)
     down = qss_icon_file("chevron_down", p["muted"])
     up = qss_icon_file("chevron_up", p["muted"])
     right = qss_icon_file("chevron_right", p["muted"])
@@ -72,7 +73,41 @@ def stylesheet(theme: str) -> str:
         background: transparent; color: {p['muted']}; font-weight: 600; }}
     QPushButton#toolButton:hover {{ background: {p['hover']}; color: {p['text']}; }}
     QPushButton#toolButton:checked {{ color: {p['accent_text']}; }}
+    QPushButton#navButton[compact="true"], QPushButton#toolButton[compact="true"] {{ padding: 9px 0; text-align: center; }}
     QWidget#devicePanel {{ background: {p['card']}; border: 1px solid {p['border']}; border-radius: 12px; }}
+
+    /* ---------- espacio de trabajo: ventanas acoplables ---------- */
+    QMainWindow#workspace {{ background: transparent; }}
+    QMainWindow#workspace::separator {{ background: transparent; width: 10px; height: 10px; }}
+    QMainWindow#workspace::separator:hover {{ background: {p['accent_soft']}; border-radius: 3px; }}
+    QDockWidget {{ background: transparent; border: 0; }}
+    QWidget#dockTitle {{ background: {p['card']}; border: 1px solid {p['border']}; border-bottom: 0;
+        border-top-left-radius: 12px; border-top-right-radius: 12px; }}
+    QLabel#dockTitleText {{ font-weight: 700; font-size: 10.5pt; color: {p['text']}; }}
+    QFrame#dockBody {{ background: {p['card']}; border: 1px solid {p['border']}; border-top: 0;
+        border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; }}
+    QFrame#dockBodyPlain {{ background: transparent; border: 0; }}
+    QPushButton#dockBtn {{ background: transparent; border: 0; border-radius: 6px; padding: 0; }}
+    QPushButton#dockBtn:hover {{ background: {p['hover']}; }}
+    QPushButton#headerMenu {{ background: transparent; border: 1px solid {p['border']}; border-radius: 8px;
+        padding: 0 12px 0 10px; color: {p['muted']}; font-weight: 600; }}
+    QPushButton#headerMenu:hover {{ background: {p['hover']}; color: {p['text']}; border-color: {p['border_strong']}; }}
+    QPushButton#headerMenu::menu-indicator {{ image: url({down}); width: 12px; height: 12px;
+        subcontrol-position: right center; subcontrol-origin: padding; left: -4px; }}
+    QMainWindow#workspace QTabBar {{ qproperty-drawBase: 0; }}
+    QMainWindow#workspace QTabBar::tab {{ background: transparent; color: {p['muted']}; padding: 6px 14px;
+        border: 1px solid transparent; border-top-left-radius: 8px; border-top-right-radius: 8px; margin-right: 2px;
+        font-weight: 600; }}
+    QMainWindow#workspace QTabBar::tab:hover {{ color: {p['text']}; }}
+    QMainWindow#workspace QTabBar::tab:selected {{ background: {p['card']}; color: {p['accent_text']};
+        border-color: {p['border']}; }}
+    QMenu {{ background: {p['card']}; border: 1px solid {p['border_strong']}; border-radius: 10px; padding: 6px; }}
+    QMenu::item {{ padding: 6px 28px 6px 12px; border-radius: 6px; }}
+    QMenu::item:selected {{ background: {p['accent_soft']}; color: {p['text']}; }}
+    QMenu::item:disabled {{ color: {p['subtle']}; }}
+    QMenu::separator {{ height: 1px; background: {p['border']}; margin: 5px 8px; }}
+    QMenu::indicator {{ width: 14px; height: 14px; }}
+    QMenu::indicator:checked {{ image: url({check_accent}); }}
 
     QLabel#pageTitle {{ font-size: 16pt; font-weight: 700; }}
     QLabel#pageSubtitle {{ color: {p['muted']}; }}
@@ -210,6 +245,11 @@ def stylesheet(theme: str) -> str:
     QPushButton#recButton[recording="true"] {{ background: {p['error_soft']}; border-color: {p['error']};
         color: {p['error']}; }}
     QWidget#playerBar {{ background: {p['accent_soft']}; border: 1px solid {p['accent']}; border-radius: 10px; }}
+
+    /* ---------- actualizaciones ---------- */
+    QPushButton#updateButton {{ background: {p['accent_soft']}; border: 1px solid {p['accent']};
+        color: {p['accent_text']}; border-radius: 8px; padding: 0 12px; font-weight: 600; }}
+    QPushButton#updateButton:hover {{ background: {p['accent_soft_solid']}; }}
     QLabel#playerBadge {{ color: {p['accent_text']}; font-size: 8pt; font-weight: 700; letter-spacing: 1px; }}
     QPushButton#dashedCard {{ background: transparent; border: 1px dashed {p['border_strong']}; border-radius: 10px;
         color: {p['muted']}; padding: 10px; }}

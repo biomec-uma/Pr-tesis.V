@@ -1,4 +1,4 @@
-"""Pestaña 'Entrenamiento': control mioeléctrico por reconocimiento de patrones.
+"""Ventana 'Entrenamiento': control mioeléctrico por reconocimiento de patrones.
 
 Es la "estación de calibración" que usan las prótesis comerciales (Coapt Gen2,
 Ottobock Myo Plus), en tres pasos:
@@ -192,8 +192,9 @@ class EmgPage(BasePage):
         lay.addWidget(self.plot_box, 1)
         self.signal_hint = _muted(
             "Sin señal EMG. Conecta la simulación (paciente virtual) o la mano real y pulsa «Recibir EMG». "
-            "Con hardware, la placa del ADS1198 debe enviar al puente: en firmware/EMG/src/main.cpp, "
-            "rxMac = MAC del puente (la muestra @INFO).")
+            "Con hardware, la placa del ADS1198 envía a la C6 cuya MAC tenga en rxMac "
+            "(firmware/EMG/src/main.cpp): el puente (su MAC la muestra @INFO) o el receptor EMG del equipo, "
+            "conectado aquí o en el Visor EMG (Ctrl+6).")
         lay.addWidget(self.signal_hint)
         return card
 

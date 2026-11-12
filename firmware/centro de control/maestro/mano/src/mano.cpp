@@ -18,8 +18,11 @@
 //  Para añadir un gesto:    1 línea en GESTOS[]
 //  Para añadir una señal:   función + 1 línea en TELEMETRY[]
 //
-//  Arduino IDE: placa "ESP32 Dev Module". Librería ESP32Servo >= 3.0
+//  PlatformIO: abre en VS Code la carpeta de este firmware (la que tiene
+//  el platformio.ini: placa ESP32 Dev Module y librería ESP32Servo >= 3.0).
+//  Al subir, mantén pulsado BOOT en la WROOM (si no: "Wrong boot mode").
 // =====================================================================
+#include <Arduino.h>
 #include <ESP32Servo.h>  // Para el servo
 #include <WiFi.h>
 #include <esp_now.h>

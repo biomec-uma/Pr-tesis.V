@@ -4,7 +4,7 @@ Se comporta como un puerto serie (read / write / in_waiting / close), así que
 SerialLink lo usa exactamente igual que un COM real: la app no nota la
 diferencia. En el selector de puerto aparece como "SIMULADOR".
 
-La lógica es una copia de firmware/mano/mano.ino (gestos, rampas, fases,
+La lógica es una copia de firmware/mano/src/mano.cpp (gestos, rampas, fases,
 modo AUTO/MANUAL) y responde con los mismos textos. ¡Si cambias el firmware
 de la mano, actualiza también este archivo para que sigan coincidiendo!
 
@@ -22,7 +22,7 @@ from .protocol import format_emg
 SIMULATOR_PORT = "SIMULADOR"
 
 # ---------------------------------------------------------------- constantes
-# (mismos valores que mano.ino)
+# (mismos valores que mano.cpp)
 DURACION_RAMPA = 500      # ms
 TIEMPO_FASE = 3000        # ms (antes: timer de 3 s)
 ARRANCAR_EN_AUTO = True
@@ -45,7 +45,7 @@ def _map(x, in_min, in_max, out_min, out_max) -> int:
 
 
 class SimulatedHand:
-    """Estado y comandos de la mano. Mismo comportamiento que mano.ino."""
+    """Estado y comandos de la mano. Mismo comportamiento que mano.cpp."""
 
     def __init__(self):
         self.pos = [DESCONOCIDO] * 3      # dónde está cada dedo
@@ -140,7 +140,8 @@ class SimulatedHand:
             return []
         self._ultima_telemetria = now
         i, m, a = self.pwm
-        return [f"DATA indice={i} medio={m} anular={a} pulgar={self.angulo_pulgar} gesto={self.gesto_actual + 1}"]
+        return [f"DATA indice={i} medio={m} anular={a} pulgar={self.angulo_pulgar} gesto={self.gesto_actual + 1} "
+                f"fase={1 if self.fase == MOVIENDO else 0}"]
 
     # --------------------------------------------------------------- comandos
     def handle(self, line: str) -> list[str]:
@@ -203,7 +204,7 @@ class SimulatedHand:
         return [f"ACK PULGAR {ang}"]
 
     def cmd_postura(self, args):
-        # Igual que cmdPostura() de mano.ino
+        # Igual que cmdPostura() de mano.cpp
         ang = self._int(args, 3, -1) if len(args) == 4 and args[3][:1].isdigit() else -1
         objs = [LETRAS.get(a.upper()) for a in args[:3]]
         if len(args) != 4 or None in objs or not 0 <= ang <= 180:
@@ -253,7 +254,7 @@ class SimulatedHand:
         return [f"ACK PERIODO {ms}"]
 
     def cmd_estado(self, _):
-        # gesto = número (0 = personalizado), igual que mano.ino
+        # gesto = número (0 = personalizado), igual que mano.cpp
         return [
             f"ACK ESTADO modo={'AUTO' if self.modo_auto else 'MANUAL'} fase={self.fase} gesto={self.gesto_actual + 1} "
             f"indice={self.pos[0]} medio={self.pos[1]} anular={self.pos[2]} "
@@ -281,7 +282,8 @@ class SimulatedSerial:
         self._in = b""
         self._lock = threading.Lock()
         self._emit("BRIDGE Puente listo. MAC=" + self.BRIDGE_MAC + " (SIMULADO)")
-        self._emit(f"Mano lista. MAC=SI:MU:LA:DO:R0:01 modo={'AUTO' if self.hand.modo_auto else 'MANUAL'} (SIMULADA)")
+        self._emit(f"Mano lista. MAC=SI:MU:LA:DO:R0:01 modo={'AUTO' if self.hand.modo_auto else 'MANUAL'} "
+                   "reinicio=encendido (SIMULADA)")
 
     # ----------------------------------------------------- API tipo pyserial
     @property

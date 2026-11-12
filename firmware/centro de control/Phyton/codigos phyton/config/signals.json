@@ -1,0 +1,296 @@
+{
+  "_comentario": [
+    "Catálogo de señales que se pueden dibujar en las ventanas de Gráficas.",
+    "Cada GRUPO es una magnitud distinta (su unidad): las señales de un grupo comparten gráfica",
+    "y cada grupo va en su propia gráfica, con el eje de tiempo sincronizado.",
+    "origen: 'mano' (llega en las líneas DATA), 'placa EMG' (líneas EMG), 'app' (la calcula la app).",
+    "estado 'pendiente': la señal está prevista pero la mano aún no la envía; sale en gris en el selector.",
+    "Una clave DATA que no esté aquí se dibuja igualmente, en el grupo 'otros'.",
+    "'canales': la clave y el nombre llevan {n} y se crean para 1..canales.",
+    "'eje': etiqueta corta del eje vertical de la gráfica del grupo; 'corto': nombre corto de la señal en la leyenda."
+  ],
+  "grupos": [
+    {
+      "id": "pwm",
+      "titulo": "Motores · PWM",
+      "unidad": "PWM",
+      "rango": [
+        -280,
+        280
+      ],
+      "eje": "PWM"
+    },
+    {
+      "id": "consigna",
+      "titulo": "Consignas · dedos",
+      "unidad": "",
+      "rango": [
+        -0.15,
+        1.15
+      ],
+      "eje": "consigna (1 = cerrar)"
+    },
+    {
+      "id": "angulo",
+      "titulo": "Pulgar",
+      "unidad": "°",
+      "rango": [
+        0,
+        180
+      ],
+      "eje": "pulgar (°)"
+    },
+    {
+      "id": "posicion_est",
+      "titulo": "Posición estimada",
+      "unidad": "%",
+      "rango": [
+        0,
+        100
+      ],
+      "eje": "% cerrado"
+    },
+    {
+      "id": "estado",
+      "titulo": "Estado de la mano",
+      "unidad": "",
+      "eje": "estado"
+    },
+    {
+      "id": "alarma",
+      "titulo": "Alarmas",
+      "unidad": "",
+      "rango": [
+        -0.15,
+        1.15
+      ],
+      "eje": "alarma (1 = activa)"
+    },
+    {
+      "id": "corriente",
+      "titulo": "Corriente de los motores",
+      "unidad": "mA",
+      "eje": "mA"
+    },
+    {
+      "id": "posicion",
+      "titulo": "Posición de los motores",
+      "unidad": "mm",
+      "eje": "mm"
+    },
+    {
+      "id": "emg_bruto",
+      "titulo": "EMG bruto",
+      "unidad": "cuentas ADC",
+      "eje": "EMG"
+    },
+    {
+      "id": "emg_filtrado",
+      "titulo": "EMG filtrado",
+      "unidad": "cuentas ADC",
+      "eje": "EMG filtrado"
+    },
+    {
+      "id": "otros",
+      "titulo": "Otras señales",
+      "unidad": "",
+      "eje": "otras"
+    }
+  ],
+  "senales": [
+    {
+      "clave": "indice",
+      "nombre": "Índice · PWM",
+      "grupo": "pwm",
+      "origen": "mano",
+      "nota": "Salida del controlador: + abre, − cierra (0–255)",
+      "corto": "Índice"
+    },
+    {
+      "clave": "medio",
+      "nombre": "Medio · PWM",
+      "grupo": "pwm",
+      "origen": "mano",
+      "corto": "Medio"
+    },
+    {
+      "clave": "anular",
+      "nombre": "Anular · PWM",
+      "grupo": "pwm",
+      "origen": "mano",
+      "corto": "Anular"
+    },
+    {
+      "clave": "pulgar",
+      "nombre": "Pulgar · ángulo del servo",
+      "grupo": "angulo",
+      "origen": "mano",
+      "corto": "Pulgar"
+    },
+    {
+      "clave": "gesto",
+      "nombre": "Gesto activo (0 = postura propia)",
+      "grupo": "estado",
+      "origen": "mano",
+      "corto": "Gesto"
+    },
+    {
+      "clave": "fase",
+      "nombre": "Fase (1 = moviendo, 0 = parada)",
+      "grupo": "estado",
+      "origen": "mano",
+      "nota": "La envía el firmware de la mano a partir de la versión de noviembre de 2026",
+      "corto": "Fase"
+    },
+    {
+      "clave": "consigna_indice",
+      "nombre": "Consigna índice",
+      "grupo": "consigna",
+      "origen": "app",
+      "nota": "Objetivo que fijó el último comando aceptado (GESTO, DEDO, POSTURA…)",
+      "corto": "Consigna índice"
+    },
+    {
+      "clave": "consigna_medio",
+      "nombre": "Consigna medio",
+      "grupo": "consigna",
+      "origen": "app",
+      "corto": "Consigna medio"
+    },
+    {
+      "clave": "consigna_anular",
+      "nombre": "Consigna anular",
+      "grupo": "consigna",
+      "origen": "app",
+      "corto": "Consigna anular"
+    },
+    {
+      "clave": "consigna_pulgar",
+      "nombre": "Consigna pulgar",
+      "grupo": "angulo",
+      "origen": "app",
+      "nota": "Ángulo pedido al servo por el último comando",
+      "corto": "Consigna pulgar"
+    },
+    {
+      "clave": "flex_indice",
+      "nombre": "Índice · % cerrado (estimado)",
+      "grupo": "posicion_est",
+      "origen": "app",
+      "nota": "Sin sensor de posición: se integra el PWM en el tiempo, como hace el gemelo digital",
+      "corto": "Índice % cerrado"
+    },
+    {
+      "clave": "flex_medio",
+      "nombre": "Medio · % cerrado (estimado)",
+      "grupo": "posicion_est",
+      "origen": "app",
+      "corto": "Medio % cerrado"
+    },
+    {
+      "clave": "flex_anular",
+      "nombre": "Anular · % cerrado (estimado)",
+      "grupo": "posicion_est",
+      "origen": "app",
+      "corto": "Anular % cerrado"
+    },
+    {
+      "clave": "sat_indice",
+      "nombre": "Saturación índice",
+      "grupo": "alarma",
+      "origen": "app",
+      "nota": "1 si el motor lleva al máximo más tiempo del previsto (tiempo de fase + rampa)",
+      "corto": "Sat. índice"
+    },
+    {
+      "clave": "sat_medio",
+      "nombre": "Saturación medio",
+      "grupo": "alarma",
+      "origen": "app",
+      "corto": "Sat. medio"
+    },
+    {
+      "clave": "sat_anular",
+      "nombre": "Saturación anular",
+      "grupo": "alarma",
+      "origen": "app",
+      "corto": "Sat. anular"
+    },
+    {
+      "clave": "i_indice",
+      "nombre": "Corriente índice",
+      "grupo": "corriente",
+      "origen": "mano",
+      "estado": "pendiente",
+      "nota": "La placa de la mano todavía no mide la corriente de los motores",
+      "corto": "I índice"
+    },
+    {
+      "clave": "i_medio",
+      "nombre": "Corriente medio",
+      "grupo": "corriente",
+      "origen": "mano",
+      "estado": "pendiente",
+      "corto": "I medio"
+    },
+    {
+      "clave": "i_anular",
+      "nombre": "Corriente anular",
+      "grupo": "corriente",
+      "origen": "mano",
+      "estado": "pendiente",
+      "corto": "I anular"
+    },
+    {
+      "clave": "i_pulgar",
+      "nombre": "Corriente pulgar",
+      "grupo": "corriente",
+      "origen": "mano",
+      "estado": "pendiente",
+      "corto": "I pulgar"
+    },
+    {
+      "clave": "pos_indice",
+      "nombre": "Posición índice",
+      "grupo": "posicion",
+      "origen": "mano",
+      "estado": "pendiente",
+      "nota": "Hace falta un sensor de posición en el motor (o un final de carrera)",
+      "corto": "Pos. índice"
+    },
+    {
+      "clave": "pos_medio",
+      "nombre": "Posición medio",
+      "grupo": "posicion",
+      "origen": "mano",
+      "estado": "pendiente",
+      "corto": "Pos. medio"
+    },
+    {
+      "clave": "pos_anular",
+      "nombre": "Posición anular",
+      "grupo": "posicion",
+      "origen": "mano",
+      "estado": "pendiente",
+      "corto": "Pos. anular"
+    },
+    {
+      "clave": "emg{n}",
+      "canales": 8,
+      "nombre": "EMG canal {n} · bruto",
+      "grupo": "emg_bruto",
+      "origen": "placa EMG",
+      "nota": "Muestras del ADS1198 a 500 Hz tal como llegan",
+      "corto": "EMG {n}"
+    },
+    {
+      "clave": "emg{n}_f",
+      "canales": 8,
+      "nombre": "EMG canal {n} · filtrado",
+      "grupo": "emg_filtrado",
+      "origen": "app",
+      "nota": "Paso alto 20 Hz + notch 50 Hz, los mismos filtros que usa el entrenamiento",
+      "corto": "EMG {n} filtrado"
+    }
+  ]
+}

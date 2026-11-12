@@ -1,6 +1,6 @@
 """Simulador de la mano y coherencia con el firmware y el catálogo.
 
-Si alguien añade un comando o un gesto en mano.ino y se olvida del simulador
+Si alguien añade un comando o un gesto en mano.cpp y se olvida del simulador
 o de commands.json (o al revés), estas pruebas fallan y dicen qué falta.
 """
 
@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def firmware(local: str, equipo: str) -> str:
-    """Lee un .ino: está en firmware/ junto a la app o, en el repositorio del equipo, en
+    """Lee el código de un firmware: está en firmware/ junto a la app o, en el repositorio del equipo, en
     firmware/centro de control/maestro/ (el puente en c6/), dos carpetas por encima de la app."""
     for path in (ROOT / "firmware" / local, ROOT.parent.parent / "maestro" / equipo):
         if path.is_file():
@@ -28,8 +28,8 @@ def firmware(local: str, equipo: str) -> str:
     raise FileNotFoundError(f"No se encuentra el firmware: ni firmware/{local} ni ../../maestro/{equipo}")
 
 
-MANO = firmware("mano/mano.ino", "mano/mano.ino")
-PUENTE = firmware("puente_pc/puente_pc.ino", "c6/puente_pc.ino")
+MANO = firmware("mano/src/mano.cpp", "mano/src/mano.cpp")
+PUENTE = firmware("puente_pc/src/puente_pc.cpp", "c6/src/puente_pc.cpp")
 
 
 def table(source: str, name: str) -> list[str]:
@@ -47,20 +47,35 @@ class FirmwareParityTest(unittest.TestCase):
         firmware = set(table(MANO, "COMMANDS[] ="))
         simulator = set(SimulatedHand()._commands)
         catalog = {c.name for c in self.cat if c.target == "mano"}
-        self.assertEqual(firmware, simulator, "mano.ino y simulator.py no tienen los mismos comandos")
-        self.assertEqual(firmware, catalog, "mano.ino y commands.json no tienen los mismos comandos")
+        self.assertEqual(firmware, simulator, "mano.cpp y simulator.py no tienen los mismos comandos")
+        self.assertEqual(firmware, catalog, "mano.cpp y commands.json no tienen los mismos comandos")
 
     def test_bridge_commands(self):
         firmware = set(table(PUENTE, "BRIDGE_COMMANDS[] ="))
         catalog = {c.name for c in self.cat if c.target == "puente"}
-        self.assertEqual(firmware, catalog, "puente_pc.ino y commands.json no tienen los mismos comandos @")
+        self.assertEqual(firmware, catalog, "puente_pc.cpp y commands.json no tienen los mismos comandos @")
+
+    def test_telemetry_keys(self):
+        """Las señales DATA del firmware, del simulador y del catálogo de gráficas coinciden."""
+        from biomec.core.signals import SignalCatalog
+        block = MANO.split("const TelemetrySignal TELEMETRY[] = {", 1)[1].split("};", 1)[0]
+        firmware = set(re.findall(r'\{"(\w+)",\s*t\w+\}', block))
+        hand = SimulatedHand()
+        hand.streaming = True
+        hand._ultima_telemetria = 0
+        line = hand.telemetry()[0]
+        simulator = {tok.split("=")[0] for tok in line.split()[1:]}
+        self.assertEqual(firmware, simulator, "mano.cpp y simulator.py no envían las mismas señales DATA")
+        catalog = SignalCatalog(config_file("signals.json"))
+        missing = firmware - set(catalog.signals)
+        self.assertFalse(missing, f"Señales del firmware sin entrada en config/signals.json: {missing}")
 
     def test_gesture_names(self):
         block = MANO.split("const Gesto GESTOS[] = {", 1)[1].split("};", 1)[0]
         rows = re.findall(r'\{"([^"]+)",\s*(\w+),\s*(\w+),\s*(\w+),\s*(\d+)\}', block)
         firmware = [(n, a.lower(), b.lower(), c.lower(), int(p)) for n, a, b, c, p in rows]
         app = [(g.nombre, g.indice, g.medio, g.anular, g.pulgar) for g in GESTOS]
-        self.assertEqual(firmware, app, "La tabla de gestos de mano.ino no coincide con core/gestures.py")
+        self.assertEqual(firmware, app, "La tabla de gestos de mano.cpp no coincide con core/gestures.py")
 
 
 class SimulatedHandTest(unittest.TestCase):

@@ -1,6 +1,6 @@
-"""Panel "Asistente IA" (lado derecho, desplegable desde cualquier pestaña).
+"""Ventana "Asistente IA".
 
-    ✦ Asistente IA                        ⚙ 🗑 ✕
+    ✦ Claude · propone, tú ejecutas       ⚙ 🗑
     ┌──────────────────────────────────────────┐
     │            [¿Por qué no responde…?]  tú  │
     │  Claude: La mano no contesta porque…     │
@@ -231,30 +231,23 @@ class AssistantPanel(BasePage):
         self._last_input = ""
         self._exec: dict | None = None  # propuesta en ejecución
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        card = QWidget()
-        card.setObjectName("card")
-        root.addWidget(card)
-        lay = QVBoxLayout(card)
-        lay.setContentsMargins(16, 14, 16, 14)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(10)
 
         head = QHBoxLayout()
         head.setSpacing(2)
         self.title_icon = QLabel()
         head.addWidget(self.title_icon)
-        title = QLabel(" Asistente IA")
-        title.setObjectName("cardTitle")
-        head.addWidget(title)
+        model_lbl = QLabel(" Claude · propone, tú ejecutas")
+        model_lbl.setObjectName("muted")
+        head.addWidget(model_lbl)
         head.addStretch(1)
         key_btn = self.button("", "key", "ghost", "Clave de API de Claude y privacidad")
         key_btn.clicked.connect(self.edit_key)
         new_btn = self.button("", "trash", "ghost", "Nueva conversación (borra el historial)")
         new_btn.clicked.connect(self.new_conversation)
-        close_btn = self.button("", "close", "ghost", "Cerrar panel (Ctrl+I)")
-        close_btn.clicked.connect(self.close_requested.emit)
-        for b in (key_btn, new_btn, close_btn):
+        for b in (key_btn, new_btn):
             head.addWidget(b)
         lay.addLayout(head)
 

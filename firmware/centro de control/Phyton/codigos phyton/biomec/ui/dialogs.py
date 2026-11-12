@@ -1,19 +1,23 @@
 """Ventanas de ayuda: atajos de teclado (F1) y "Acerca de"."""
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialog, QGridLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import QCheckBox, QDialog, QGridLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
 from .. import APP_NAME, APP_VERSION, ORG_NAME
+from ..core.updates import RELEASES_PAGE
 from ..paths import asset
 from .icons import logo_badge
 from .widgets import style_titlebar
 
 SHORTCUTS = [
     ("Ctrl+K", "Paleta de comandos: buscar y ejecutar cualquier acción"),
-    ("Ctrl+1 … Ctrl+3", "Cambiar de pestaña (Gemelo digital, Gráficas, Entrenamiento)"),
-    ("Ctrl+Shift+K", "Mostrar / ocultar el panel Comandos (catálogo e historial)"),
-    ("Ctrl+J", "Desplegar / plegar la consola"),
+    ("Ctrl+1 … Ctrl+5", "Mostrar / ocultar ventanas: Gemelo digital, Posturas, Gráficas, Entrenamiento, Dispositivo"),
+    ("Ctrl+6 / Ctrl+7", "Mostrar / ocultar el Visor EMG y el Analizador EMG"),
+    ("Ctrl+J", "Mostrar / ocultar la Consola"),
+    ("Ctrl+Shift+K", "Mostrar / ocultar Comandos (catálogo e historial)"),
     ("Ctrl+I", "Asistente IA: abrir y escribir"),
+    ("Ctrl+Shift+G", "Nueva gráfica (otra ventana con las señales que elijas)"),
+    ("Ctrl+B", "Mostrar / ocultar la barra lateral"),
     ("Alt+1 … Alt+8", "Enviar el gesto 1 … 8"),
     ("Esc", "PARAR: frena todos los motores"),
     ("Ctrl+M", "Control por voz: empezar / dejar de escuchar"),
@@ -82,7 +86,7 @@ class VoiceHelpDialog(_Base):
         ("Gestos", "por su nombre (mano abierta, índice y medio… gancho) · gesto uno … gesto ocho"),
         ("Dedos", "abre / cierra el índice, el medio, el anular · abre / cierra el pulgar"),
         ("Modo", "modo manual · modo demostración"),
-        ("App", "gemelo digital · gráficas · entrenamiento · graba · deja de grabar"),
+        ("App", "gemelo digital · posturas · gráficas · entrenamiento · graba · deja de grabar"),
     ]
 
     def __init__(self, parent, postures: list[str]):
@@ -154,6 +158,24 @@ class AboutDialog(_Base):
                 "Esta aplicación controla la mano a través de una ESP32-C6 (USB ↔ ESP-NOW) e incluye un "
                 "simulador, un gemelo digital del diseño en SolidWorks, entrenamiento de IA con señales EMG "
                 "y un asistente con IA.")
+        controller = getattr(parent, "updates", None)
+        if controller is not None and controller.installed:
+            section("Actualizaciones",
+                    "Busca versiones nuevas en GitHub al arrancar y avisa en la cabecera.")
+            row = QHBoxLayout()
+            auto = QCheckBox("Buscar actualizaciones al arrancar")
+            auto.setChecked(controller.auto)
+            auto.toggled.connect(lambda on: setattr(controller, "auto", on))
+            row.addWidget(auto)
+            row.addStretch(1)
+            now = QPushButton("Buscar ahora")
+            now.clicked.connect(lambda: (self.accept(), parent.check_updates(manual=True)))
+            row.addWidget(now)
+            self.lay.addLayout(row)
+        elif controller is not None:
+            section("Actualizaciones",
+                    "Esta copia (código o dist) no se actualiza sola; la instalada sí. "
+                    f"Instalador: <a href='{RELEASES_PAGE}'>GitHub → Releases</a>.")
         section("Seguridad",
                 "El botón <b>Parar</b> es una parada por software: envía PARAR por radio y depende de la "
                 "comunicación. <b>No sustituye a una parada de emergencia física</b> ni a cortar la alimentación.")

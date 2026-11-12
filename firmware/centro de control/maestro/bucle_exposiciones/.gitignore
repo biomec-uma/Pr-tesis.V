@@ -1,0 +1,5 @@
+# PlatformIO
+.pio/
+.vscode/
+# Arduino IDE / arduino-cli
+build/

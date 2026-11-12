@@ -1,7 +1,6 @@
-"""Panel desplegable de comandos (lado derecho, se abre desde cualquier pestaña).
+"""Ventana Comandos: catálogo e historial.
 
-    Comandos                         ⟳ ✎ ✕
-    [ Catálogo ][ Historial ]
+    [ Catálogo ][ Historial ]        ⟳ ✎
     🔍 buscar…
     ▾ Gestos
         GESTO
@@ -12,7 +11,7 @@
     │ descripción, argumentos…       │
     │ [Insertar en consola] [Enviar] │
     └────────────────────────────────┘
-Atajo: Ctrl+K abre el panel con el buscador listo.
+Atajo: Ctrl+Mayús+K muestra la ventana con el buscador listo.
 """
 
 import os
@@ -47,40 +46,28 @@ class CommandsPanel(BasePage):
 
     def __init__(self, ctx):
         super().__init__(ctx)
-        self.setMinimumWidth(340)
-        root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        card = QWidget()
-        card.setObjectName("card")
-        root.addWidget(card)
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(16, 14, 16, 16)
+        self.setMinimumWidth(320)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(10)
 
-        # --- cabecera
+        # --- pestañas Catálogo / Historial + acciones del catálogo
         head = QHBoxLayout()
         head.setSpacing(2)
-        title = QLabel("Comandos")
-        title.setObjectName("cardTitle")
-        head.addWidget(title)
-        head.addStretch(1)
-        reload_btn = self.button("", "refresh", "ghost", "Recargar config/commands.json")
-        reload_btn.clicked.connect(self.ctx.reload_catalog)
-        edit_btn = self.button("", "pencil", "ghost", "Editar config/commands.json (añadir o cambiar comandos)")
-        edit_btn.clicked.connect(lambda: os.startfile(self.ctx.catalog.path))
-        close_btn = self.button("", "close", "ghost", "Cerrar panel (Ctrl+K)")
-        close_btn.clicked.connect(self.close_requested.emit)
-        for b in (reload_btn, edit_btn, close_btn):
-            head.addWidget(b)
-        layout.addLayout(head)
-
-        # --- pestañas Catálogo / Historial
         tabs = Segmented(("Catálogo", "Historial"))
         self.tab_group = tabs.group
         self.stack = QStackedWidget()
         self.tab_group.button(0).setChecked(True)
         self.tab_group.idClicked.connect(self.stack.setCurrentIndex)
-        layout.addWidget(tabs)
+        head.addWidget(tabs, 1)
+        head.addSpacing(4)
+        reload_btn = self.button("", "refresh", "ghost", "Recargar config/commands.json")
+        reload_btn.clicked.connect(self.ctx.reload_catalog)
+        edit_btn = self.button("", "pencil", "ghost", "Editar config/commands.json (añadir o cambiar comandos)")
+        edit_btn.clicked.connect(lambda: os.startfile(self.ctx.catalog.path))
+        for b in (reload_btn, edit_btn):
+            head.addWidget(b)
+        layout.addLayout(head)
         layout.addWidget(self.stack, 1)
 
         # --- Catálogo

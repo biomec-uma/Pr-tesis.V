@@ -104,8 +104,10 @@ vuelven por el mismo camino. Los comandos que empiezan por @ los ejecuta el prop
 - La mano tiene 3 motores DC (índice, medio y anular+meñique juntos) con rampas de 500 ms; cada movimiento \
 dura TIEMPO ms (3000 por defecto). No hay sensores de posición: cada dedo está abierto, cerrado o \
 «desconocido» (si se interrumpió). El pulgar es un servo: 10° separado, 90° en pinza.
-- Placa EMG: ESP32-C3 + ADS1198 (8 canales; el equipo usa 2) a 500 muestras/s. Sus paquetes llegan a la app \
-por el puente cuando se activa @EMG 1.
+- Placa EMG: ESP32-C3 + ADS1198 (8 canales; el equipo usa 2) a 500 muestras/s. Envía por ESP-NOW a la C6 \
+cuya MAC tenga en rxMac. El puente funciona con y sin ella: sin placa EMG solo mueve la mano; con ella, además \
+manda su señal al PC en marcos binarios AA 55 (los mismos que el receptor EMG del equipo), que la app separa \
+de las líneas de texto. @EMG 0 deja de mandarla y @EMG 1 la reactiva (arranca activado).
 - Modo simulación: una mano y un «paciente virtual» simulados dentro de la app responden igual que el \
 hardware, sin mover nada real.
 
@@ -120,12 +122,23 @@ ACK (comando ejecutado) · ERR (error) · BRIDGE (mensaje del puente) · EMG (mu
 {gestures}
 
 # La app
-- Gemelo digital: modelo 3D que imita a la mano. Pestaña Control (seguir a la mano, % de cierre) y Postura \
-(galería de gestos, «Mis posturas» personalizadas que se envían con POSTURA, dedos sueltos, pulgar, modo).
-- Gráficas: telemetría en tiempo real con marcas de cada comando enviado.
-- Entrenamiento: graba EMG guiado por movimientos, entrena un clasificador (características de Hudgins + \
-LDA) y puede mover la mano con los músculos. Exporta el modelo a C para la ESP32.
-- Grabar (Ctrl+R) y Reproducir (Ctrl+O) sesiones; consola (Ctrl+J); paleta de comandos (Ctrl+K).
+- Espacio de trabajo por ventanas: cada parte es una ventana que se muestra u oculta desde la barra lateral \
+o el menú Ventanas, se recoloca arrastrando su título, se agrupa en pestañas o se saca flotante. Espacios \
+predefinidos: Demostración, Ensayo, Entrenamiento y Todo. Barra lateral plegable (Ctrl+B).
+- Gemelo digital (Ctrl+1): modelo 3D que imita a la mano, con «Seguir a la mano» y el % de cierre estimado.
+- Posturas (Ctrl+2): galería de gestos, «Mis posturas» personalizadas que se envían con POSTURA, dedos \
+sueltos, pulgar y modo Manual/Demo.
+- Gráficas (Ctrl+3; «Nueva gráfica» abre más): señales elegidas de un catálogo por magnitudes (PWM, \
+consignas, pulgar, % cerrado estimado, estado, alarmas de saturación, EMG bruto y filtrado). Cada comando deja \
+una línea al enviarse, una zona sombreada y una línea punteada cuando los motores terminan.
+- Entrenamiento (Ctrl+4): graba EMG guiado por movimientos, entrena un clasificador (características de \
+Hudgins + LDA) y puede mover la mano con los músculos. Exporta el modelo a C para la ESP32.
+- Dispositivo (Ctrl+5): mano real o simulación y conexión. Consola (Ctrl+J), Comandos (Ctrl+Mayús+K).
+- Visor EMG (Ctrl+6): señal en directo, diagnóstico del enlace (paquetes/s, perdidos, envíos fallidos, \
+marcos corruptos, MAC y contadores de la C6) y grabación en CSV; puede abrir el receptor EMG del equipo en \
+un segundo USB. Analizador EMG (Ctrl+7): el analizador en MATLAB del equipo (notch, paso banda, espectro, \
+envolvente RMS y umbral de contracción), con los mismos resultados.
+- Grabar (Ctrl+R) y Reproducir (Ctrl+O) sesiones; paleta de comandos (Ctrl+K).
 - Parar (Esc) envía PARAR: es una parada por software que depende de la radio, no una parada de emergencia física.
 - Latencia: tiempo entre enviar un comando y recibir su respuesta. Verde < 100 ms, ámbar ≤ 125 ms. \
 Farrell y Weir (2007) sitúan el retardo óptimo del control completo en 100-125 ms.
@@ -136,8 +149,12 @@ Farrell y Weir (2007) sitúan el retardo óptimo del control completo en 100-125
 firmware de la mano; hay que subir firmware/puente_pc.
 - «Mano: sin respuesta» con el puente conectado: la mano está apagada, usa otro canal ESP-NOW, la MAC \
 configurada (HAND_MAC / BRIDGE_MAC) no es la correcta o la mano no tiene el firmware nuevo.
-- Sin señal EMG: en firmware/EMG/src/main.cpp, rxMac debe ser la MAC del puente (la da @INFO); falta @EMG 1; \
-o EMG_CANALES del puente no coincide con N_CHNLS de la placa.
+- Sin señal EMG: en firmware/EMG/src/main.cpp, rxMac debe ser la MAC de la C6 conectada (el puente la da con \
+@INFO; el receptor del equipo es AC:EB:E6:2C:D7:DC); el puente tiene @EMG 0; o, con el formato antiguo, \
+EMG_CANALES del puente no coincide con N_CHNLS de la placa. @INFO dice si llega algo (sensor=si/no).
+- Llega EMG pero la mano no responde a los comandos: la C6 conectada tiene el firmware del receptor del \
+equipo (firmware/maestro), que no habla con la mano; hay que subirle firmware/puente_pc (en el repositorio del \
+equipo, maestro/c6; proyecto de PlatformIO, entorno c6zero para la C6-Zero del receptor), que hace las dos cosas.
 - Poca precisión de la IA: incluir Reposo, grabar 2 o más repeticiones, movimientos más distintos entre sí, \
 más canales del ADS1198.
 

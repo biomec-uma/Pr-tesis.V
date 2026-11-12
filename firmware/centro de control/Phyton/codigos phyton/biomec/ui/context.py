@@ -15,6 +15,9 @@ Las páginas NO se importan entre sí. Se comunican a través de este objeto:
   - ctx.recording_changed          se empieza / termina de grabar una sesión
   - ctx.replay_changed             se empieza / termina de reproducir una sesión
   - ctx.simulated / sim_mode_changed  modo Simulación elegido en el panel Dispositivo
+  - ctx.emg_receiver               receptor EMG del equipo por USB (Visor EMG): su señal llega por ctx.message
+                                   como la del puente
+  - ctx.analyze_emg_file           pedir al Analizador EMG que abra y analice un CSV (lo usa el Visor EMG)
 
 Latencia: se mide desde que la app envía un comando hasta que llega su
 respuesta (ACK/ERR de la mano, o BRIDGE para los comandos @ del puente).
@@ -30,12 +33,14 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QTimer, Signal
 
 from ..core.commands import CommandCatalog, CommandError
+from ..core.emg_receiver import EmgReceiver
 from ..core.gestures import GESTOS
 from ..core.postures import PostureStore, spec_from_ack
 from ..core.protocol import Message, MessageKind
 from ..core.serial_link import SerialLink
 from ..core.session import SessionRecorder
-from ..paths import user_data_dir
+from ..core.signals import DEFAULT_CLOSE_TIME_S, SignalCatalog, SignalStore
+from ..paths import config_file, user_data_dir
 
 LATENCY_GOOD_MS = 100    # por debajo: verde
 LATENCY_LIMIT_MS = 125   # por encima: rojo (entre ambos: ámbar)
@@ -44,6 +49,16 @@ LATENCY_LIMIT_MS = 125   # por encima: rojo (entre ambos: ámbar)
 def latency_level(ms: float) -> str:
     """Clave de color de la paleta para una latencia: ok / warn / error."""
     return "ok" if ms < LATENCY_GOOD_MS else "warn" if ms <= LATENCY_LIMIT_MS else "error"
+
+
+def _close_time_s() -> float:
+    """Tiempo que tarda un dedo en cerrarse (config/mano3d.json), para estimar el % cerrado sin sensor."""
+    try:
+        import json
+        return float(json.loads(config_file("mano3d.json").read_text(encoding="utf-8")).get("tiempo_cierre_s",
+                                                                                              DEFAULT_CLOSE_TIME_S))
+    except (OSError, ValueError, TypeError):
+        return DEFAULT_CLOSE_TIME_S
 
 
 class AppContext(QObject):
@@ -60,6 +75,7 @@ class AppContext(QObject):
     sim_mode_changed = Signal(bool)
     toast = Signal(str, str)  # aviso flotante: (texto, "ok" | "info")
     replay_changed = Signal(bool)
+    analyze_emg_file = Signal(str)
 
     def __init__(self, link: SerialLink, catalog: CommandCatalog, theme: str = "dark",
                  postures_path: str | Path | None = None):
@@ -73,6 +89,9 @@ class AppContext(QObject):
         self.replaying = False
         self.simulated = False  # modo elegido en el panel Dispositivo (lo fija la ventana)
         self.time_scale = 1.0  # velocidad de la reproducción (el gemelo integra el tiempo de la grabación)
+        # Señales graficables (compartidas por todas las ventanas de Gráficas)
+        self.signals = SignalStore(SignalCatalog(config_file("signals.json")), close_time_s=_close_time_s(),
+                                   time_scale=lambda: self.time_scale)
 
         self.latencies: deque[float] = deque(maxlen=30)
         self._pending: deque[tuple[float, str]] = deque()
@@ -85,7 +104,13 @@ class AppContext(QObject):
         link.message_received.connect(self.message)
         link.connection_changed.connect(self._on_connection)
         link.connection_changed.connect(self.connection_changed)
+        # receptor EMG del equipo (segundo puerto USB): su señal entra por el mismo camino que la del puente
+        self.emg_receiver = EmgReceiver(self)
+        self.emg_receiver.message_received.connect(self.message)
+        self.emg_receiver.notice.connect(self._receiver_notice)
         self.message.connect(self._record)
+        self.message.connect(self.signals.on_message)
+        self.replay_changed.connect(lambda _r: self.signals.clear())  # el tiempo de las gráficas empieza de cero
 
         self._status_timer = QTimer(self)
         self._status_timer.setInterval(500)
@@ -134,6 +159,10 @@ class AppContext(QObject):
         self.message.emit(Message(MessageKind.ERROR if error else MessageKind.SYSTEM, text))
         if toast and not error:
             self.toast.emit(text, "ok")
+
+    def _receiver_notice(self, kind: str, text: str) -> None:
+        """Avisos del receptor EMG (llegan desde su hilo; Qt los entrega aquí, en el de la interfaz)."""
+        self.notify(text, error=kind == "error")
 
     def set_simulated(self, simulated: bool) -> None:
         if simulated != self.simulated:

@@ -1,4 +1,4 @@
-"""Tabla de gestos de la mano (la misma que GESTOS[] en firmware/mano/mano.ino).
+"""Tabla de gestos de la mano (la misma que GESTOS[] en firmware/mano/src/mano.cpp).
 
 La usan el simulador y la galería de gestos de la app. Si se añade o cambia
 un gesto en el firmware, hay que reflejarlo aquí (y en el rango de GESTO en

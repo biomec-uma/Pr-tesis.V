@@ -1,5 +1,5 @@
 {
-  "_info": "Catálogo de comandos. Para añadir uno basta con añadir un bloque a 'commands' (y su handler en firmware/mano/mano.ino). 'target': 'mano' se reenvía por ESP-NOW; 'puente' lo procesa la C6 del PC (se envía con prefijo @). 'args': lista de argumentos con tipo int|float|text, rango opcional (min/max) u opciones fijas (choices).",
+  "_info": "Catálogo de comandos. Para añadir uno basta con añadir un bloque a 'commands' (y su handler en firmware/mano/src/mano.cpp). 'target': 'mano' se reenvía por ESP-NOW; 'puente' lo procesa la C6 del PC (se envía con prefijo @). 'args': lista de argumentos con tipo int|float|text, rango opcional (min/max) u opciones fijas (choices).",
   "commands": [
     {
       "name": "GESTO",
@@ -73,7 +73,7 @@
       "name": "AUTO",
       "category": "Control",
       "target": "mano",
-      "description": "Modo demo: recorre los 8 gestos automáticamente (como el código original).",
+      "description": "Modo demo (bucle de exposiciones): recorre los 8 gestos automáticamente, como al encender la mano.",
       "args": []
     },
     {
@@ -135,7 +135,7 @@
       "name": "EMG",
       "category": "EMG",
       "target": "puente",
-      "description": "Activa (1) o desactiva (0) el reenvío a la app de las señales EMG de la placa del ADS1198. Lo activa y desactiva la pestaña Entrenamiento.",
+      "description": "Activa (1) o desactiva (0) el reenvío a la app de las señales EMG de la placa del ADS1198. Lo activa y desactiva la ventana Entrenamiento.",
       "args": [
         {"name": "estado", "type": "int", "min": 0, "max": 1}
       ]

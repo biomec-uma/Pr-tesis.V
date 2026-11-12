@@ -13,8 +13,13 @@ Puente / mano -> PC (la primera palabra indica el tipo)
     BRIDGE texto          Mensaje informativo del puente
     EMG seq canales v...  Muestras EMG (las reenvía el puente si se activa con @EMG 1):
                           seq = nº de paquete, canales = nº de canales y después las
-                          muestras intercaladas: s1c1 s1c2 … s2c1 s2c2 … (cuentas del ADC)
+                          muestras intercaladas: s1c1 s1c2 … s2c1 s2c2 … (cuentas del ADC).
+                          El receptor EMG del equipo (core/emg_receiver.py) da el mismo Message.
     cualquier otra cosa   Texto libre, se muestra en la consola
+
+Además, si la placa EMG está encendida, el puente manda su señal en marcos binarios
+«AA 55 tipo longitud contenido XOR» entre las líneas (los mismos que el receptor del equipo).
+SerialLink los separa del texto (core/emg_receiver.FrameStream) y los convierte en Messages EMG.
 
 Para añadir un tipo nuevo: añade una constante a MessageKind y una
 entrada en _PREFIXES. Las páginas que no lo usen simplemente lo ignoran.
@@ -52,6 +57,10 @@ class EmgFrame:
     """Un paquete de muestras EMG: samples tiene forma (muestras, canales)."""
     seq: int
     samples: np.ndarray
+    send_fails: int | None = None   # envíos fallidos que cuenta el sensor (solo en los marcos AA 55)
+    source: str = "puente"          # "puente": líneas EMG de texto o la simulación · "receptor": puerto del Visor
+                                    # EMG · "conexion": marcos AA 55 por la conexión principal de la app
+    seq_bits: int = 16              # bits del número de paquete: 16 en las líneas de texto, 32 en los marcos
 
     @property
     def channels(self) -> int:
