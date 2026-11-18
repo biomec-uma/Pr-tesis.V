@@ -1,3 +1,4 @@
+#include <Arduino.h>
 #include <WiFi.h>
 #include <esp_now.h>
 #include <esp_wifi.h>
@@ -12,7 +13,9 @@
 
 // ----- Paquete que llega del sensor -----
 #define CABECERA_SENSOR 9   // version(1) + nChnls(1) + batch(1) + seq(4) + sendFails(2)=9 equivale a 1 fila sin valores EMG
+#define COLA_V2 9
 #define MAX_ESPNOW 250      // 250bytes/paquete equivale a tamaño maximoenviable por ESPNOW
+#define AVISO_SATURACION_MS 1000
 
 // Hacemos un struct con el paquete tal cual llega y cuantos bytes validos tiene 
 typedef struct {
@@ -39,6 +42,10 @@ volatile uint32_t invalidos = 0;
 volatile uint32_t perdidosCola = 0;
 uint32_t descartadosUSB = 0;   // solo lo toca el loop() no hace falta volatile
 uint32_t ultimoPaqueteMs = 0;
+uint32_t ultimaSaturacionMs = 0; // cuando se vio subir por ultima vez el contador de saturaciones
+bool haySaturacionPrevia = false; // false hasta recibir el primer paquete version 2
+uint16_t saturacionesPrevias = 0; // ultimo valor del contador de saturaciones del sensor
+
 
 //Variables LED C6
 #define LED_PIN 8
@@ -52,12 +59,21 @@ void initLED(){
   led.show();
 }
 
+// Bytes que lleva el paquete detras de los datos EMG segun su version.
+// Devuelve -1 si la version es desconocida.
+int bytesCola(uint8_t version){
+  if (version == 1) return 0;        // formato original: sin campos al final
+  if (version == 2) return COLA_V2;  // formato con modo y diagnostico
+  return -1;
+}
+
 void onDataReceived(const esp_now_recv_info_t *info, const uint8_t *data, int len){
   // data[version(1), nChnls(1), batch(1), seq(4), sendFails(2), data[nChnls*batch*2] 
 
   // Filtro para descartar paquetes con otro formato
   if (len < CABECERA_SENSOR || len > MAX_ESPNOW){ invalidos++; return; }
   //Registro el nº de canales y nº de muestras por paquete para 2ºcomprobación
+  int extra = bytesCola(data[0]);
   uint8_t nChnls = data[1];  uint8_t batch  = data[2];
   //Filtro para descartar paquetes corruptos a pesar de tener bien el formato
   if (len != CABECERA_SENSOR + nChnls * batch * 2){ invalidos++; return; }
@@ -108,12 +124,28 @@ void enviarEstado(){
   enviarMarco(TIPO_ESTADO, (uint8_t*)&e, sizeof(e));
 }
 
+// Lee el contador de saturaciones de un paquete version 2 y anota si ha subido
+void revisarSaturacion(const Recibido &r){
+  if (r.datos[0] != 2) return;
+  int pos = CABECERA_SENSOR + r.datos[1] * r.datos[2] * 2 + 1; // +1: salta el campo modo
+  uint16_t sat = r.datos[pos] | (r.datos[pos + 1] << 8);      // little-endian, como lo guarda el ESP32
+  if (haySaturacionPrevia && sat != saturacionesPrevias) ultimaSaturacionMs = millis();
+  saturacionesPrevias = sat;
+  haySaturacionPrevia = true;
+}
+
 void actualizarLED(){
   static int8_t pintado = -1;   // -1: todavía no se ha pintado nada
-  int8_t recibiendo = (millis() - ultimoPaqueteMs < 500) ? 1 : 0;
-  if (recibiendo == pintado) return;   // solo se toca el LED si cambia el estado
-  pintado = recibiendo;
-  led.setPixelColor(0, recibiendo ? led.Color(0, 0, 255) : led.Color(255, 0, 0));
+   // 0 = no llegan paquetes (rojo), 1 = recibiendo (azul), 2 = recibiendo pero el sensor ha saturado hace poco (amarillo)
+  int8_t estado = 0;
+  if (millis() - ultimoPaqueteMs < 500){
+    estado = (ultimaSaturacionMs != 0 && millis() - ultimaSaturacionMs < AVISO_SATURACION_MS) ? 2 : 1;
+  }
+  if (estado == pintado) return;   // solo se toca el LED si cambia el estado
+  pintado = estado;
+  if (estado == 0)      led.setPixelColor(0, led.Color(255, 0, 0));
+  else if (estado == 1) led.setPixelColor(0, led.Color(0, 0, 255));
+  else                  led.setPixelColor(0, led.Color(255, 180, 0));
   led.show();
 }
 
@@ -133,6 +165,7 @@ void loop(){
  Recibido r;
   if (xQueueReceive(cola, &r, pdMS_TO_TICKS(5)) == pdTRUE){
     enviarMarco(TIPO_DATOS, r.datos, r.len);
+    revisarSaturacion(r);
     ultimoPaqueteMs = millis();
   }
   static uint32_t ultimoEstado=0;
