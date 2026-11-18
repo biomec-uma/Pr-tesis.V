@@ -1,0 +1,2 @@
+muestra,nMuestras,duracion_s,p50_ch0,p50_ch1,p50notch_ch0,p50notch_ch1,rmsReposo_ch0_uV,rmsReposo_ch1_uV,umbral_ch0_uV,umbral_ch1_uV,sps,notchOn,f0_Hz,Q,bandaOn,fBaja_Hz,fAlta_Hz,tRMS_s,tReposoIni_s,tReposoFin_s,kUmbral
+DylanYaAntebrazo_20261118_131257.csv,7015,14.03,7.22296306993425,3.84221134836434,0.156316441108354,0.284076896303418,6.07743859024824,123.26744958894,10.8213699338065,513.611023348806,500,1,50,35,1,20,130,0.2,0.5,2.5,3

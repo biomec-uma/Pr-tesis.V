@@ -1,0 +1,2 @@
+muestra,nMuestras,duracion_s,p50_ch0,p50_ch1,p50notch_ch0,p50notch_ch1,rmsReposo_ch0_uV,rmsReposo_ch1_uV,umbral_ch0_uV,umbral_ch1_uV,sps,notchOn,f0_Hz,Q,bandaOn,fBaja_Hz,fAlta_Hz,tRMS_s,tReposoIni_s,tReposoFin_s,kUmbral
+DylanYaBicep_20261118_131322.csv,12830,25.66,2.0135384048563,21.7575135950804,0.256849724212664,0.385263681089309,39.324636703211,21.7448102997915,143.838803688288,70.6310566575407,500,1,50,35,1,20,130,0.2,0.5,2.5,3

@@ -1,0 +1,2 @@
+muestra,nMuestras,duracion_s,p50_ch0,p50_ch1,p50notch_ch0,p50notch_ch1,rmsReposo_ch0_uV,rmsReposo_ch1_uV,umbral_ch0_uV,umbral_ch1_uV,sps,notchOn,f0_Hz,Q,bandaOn,fBaja_Hz,fAlta_Hz,tRMS_s,tReposoIni_s,tReposoFin_s,kUmbral
+DylanYaReposo_20261118_131135.csv,15025,30.05,13.1266411405562,38.5599291341113,0.206432716013102,0.664095430814676,4.80818797156144,5.09989045299433,5.99804377648208,7.8121177574001,500,1,50,35,1,20,130,0.2,0.5,2.5,3
