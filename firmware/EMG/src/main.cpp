@@ -10,7 +10,7 @@ typedef struct __attribute__((packed)){//__attribute__ es para no meter relleno 
   int16_t data[BATCH][N_CHNLS];
 } Packet;
 
-uint8_t rxMac[]={0xAC,0xEB,0xE6,0x00,0x55,0xB4}; //RECEPTOR C6
+uint8_t rxMac[]={0xAC,0xEB,0x2C,0xD7,0x55,0xB4}; //RECEPTOR C6
 Packet pkt;
 uint8_t idx=0;
 uint16_t seq=0;
@@ -293,7 +293,7 @@ void setup() {
   Serial.begin(115200);
   prepararADS();
   configurarADS();
-  configurarRLD();
+  //configurarRLD();
   testearADS(testADS,testModeSignalCuadrada); //Si testADS = true no se obtienen muestras EMG
   initEspNow();
   attachInterrupt(digitalPinToInterrupt(dataReady_Pin),dataReadyADS,FALLING);
