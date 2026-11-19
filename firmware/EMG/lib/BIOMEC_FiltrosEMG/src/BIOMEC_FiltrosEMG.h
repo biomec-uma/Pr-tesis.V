@@ -53,6 +53,7 @@ private:
 // -----------------------------------------------------------------------------
 class FiltroEMG {
 public:
+  static const uint8_t MAX_NOTCH = 4;
   FiltroEMG();
 
   void iniciar(float fs);                // fs = frecuencia de muestreo (Hz)
@@ -72,9 +73,11 @@ public:
 private:
   float fs_;
   Biquad pasoAlto_[2];
-  Biquad notch_;
+  Biquad notch_[MAX_NOTCH];
+  float fNotch_[MAX_NOTCH]; 
+  uint8_t nNotch_;
   Biquad pasoBajo_;
-  bool pasoAltoActivo_, notchActivo_, pasoBajoActivo_;
+  bool pasoAltoActivo_, pasoBajoActivo_;
   bool primera_;      // true hasta recibir la primera muestra
   float offset0_;     // valor de la primera muestra (evita el salto inicial)
 };

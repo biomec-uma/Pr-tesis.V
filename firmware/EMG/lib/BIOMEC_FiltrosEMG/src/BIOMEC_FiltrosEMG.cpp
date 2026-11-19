@@ -64,12 +64,13 @@ bool Biquad::configurarPasoBajo(float fc, float Q, float fs) {
 //  FiltroEMG
 // =============================================================================
 FiltroEMG::FiltroEMG()
-    : fs_(500.0f), pasoAltoActivo_(false), notchActivo_(false), pasoBajoActivo_(false),
+    : fs_(500.0f), nNotch_(0), pasoAltoActivo_(false), pasoBajoActivo_(false),
       primera_(true), offset0_(0.0f) {}
 
 void FiltroEMG::iniciar(float fs) {
   fs_ = fs;
-  pasoAltoActivo_ = notchActivo_ = pasoBajoActivo_ = false;
+  pasoAltoActivo_ = pasoBajoActivo_ = false;
+  nNotch_ = 0;
   primera_ = true;
 }
 
@@ -81,9 +82,15 @@ bool FiltroEMG::pasoAlto(float fc) {
 }
 
 bool FiltroEMG::notch(float f0, float Q) {
-  bool ok = notch_.configurarNotch(f0, Q, fs_);
-  notchActivo_ = ok;
-  return ok;
+  // Si ya hay un notch en esa frecuencia, solo se reajusta (por ejemplo, otra Q)
+  for (uint8_t i = 0; i < nNotch_; i++) {
+    if (fabsf(fNotch_[i] - f0) < 0.01f) return notch_[i].configurarNotch(f0, Q, fs_);
+  }
+  if (nNotch_ >= MAX_NOTCH) return false;                     // no caben más
+  if (!notch_[nNotch_].configurarNotch(f0, Q, fs_)) return false;  // frecuencia no válida
+  fNotch_[nNotch_] = f0;
+  nNotch_++;
+  return true;
 }
 
 bool FiltroEMG::pasoBajo(float fc) {
@@ -98,13 +105,13 @@ bool FiltroEMG::pasaBanda(float fBaja, float fAlta) {
 }
 
 void FiltroEMG::quitarPasoAlto() { pasoAltoActivo_ = false; }
-void FiltroEMG::quitarNotch() { notchActivo_ = false; }
+void FiltroEMG::quitarNotch() { nNotch_ = 0; }
 void FiltroEMG::quitarPasoBajo() { pasoBajoActivo_ = false; }
 
 void FiltroEMG::reiniciar() {
   pasoAlto_[0].reiniciar();
   pasoAlto_[1].reiniciar();
-  notch_.reiniciar();
+  for (uint8_t i = 0; i < MAX_NOTCH; i++) notch_[i].reiniciar();
   pasoBajo_.reiniciar();
   primera_ = true;
 }
@@ -119,7 +126,7 @@ float FiltroEMG::procesar(float x) {
     y = pasoAlto_[0].procesar(y);
     y = pasoAlto_[1].procesar(y);
   }
-  if (notchActivo_) y = notch_.procesar(y);
+  for (uint8_t i = 0; i < nNotch_; i++) y = notch_[i].procesar(y);
   if (pasoBajoActivo_) y = pasoBajo_.procesar(y);
   return y;
 }

@@ -75,8 +75,9 @@ void onDataReceived(const esp_now_recv_info_t *info, const uint8_t *data, int le
   //Registro el nº de canales y nº de muestras por paquete para 2ºcomprobación
   int extra = bytesCola(data[0]);
   uint8_t nChnls = data[1];  uint8_t batch  = data[2];
+  if (extra < 0){ invalidos++; return; } //Version desconocida
   //Filtro para descartar paquetes corruptos a pesar de tener bien el formato
-  if (len != CABECERA_SENSOR + nChnls * batch * 2){ invalidos++; return; }
+  if (len != CABECERA_SENSOR + nChnls * batch * 2+extra){ invalidos++; return; }
 
   // Creo un paquete ajustado al recibido por ESPNOW 
   Recibido r;

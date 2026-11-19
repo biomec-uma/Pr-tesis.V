@@ -21,8 +21,9 @@ const float VREF_V = 2.4f; //Referencia interna del ADS (CONFIG3 = 0xCC -> 2,4 V
 const float UV_POR_CUENTA = (2.0f * VREF_V / GANANCIA_NUM) / 65536.0f * 1e6f; //µV que vale 1 cuenta
 
 const float FC_PASO_ALTO = 20.0f; //Hz. Quita offset y artefactos de movimiento
-const float F_NOTCH = 50.0f; //Hz. Red electrica
-const float Q_NOTCH = 35.0f; //Anchura de la muesca (mas alto = mas estrecha)
+const float F_NOTCH[] = {50.0f, 100.0f, 150.0f, 200.0f}; //Hz. Red electrica y sus armonicos
+const float Q_NOTCH[] = {20.0f, 35.0f, 35.0f, 35.0f}; //Anchura de cada muesca (mas alto = mas estrecha)
+const int N_NOTCH = sizeof(F_NOTCH) / sizeof(F_NOTCH[0]); //Cuantos hay (maximo FiltroEMG::MAX_NOTCH)
 const float FC_PASO_BAJO = 0.0f; //Hz. 0 = desactivado (el ADS ya corta en ~130 Hz a 500 SPS)
 
 const int16_t UMBRAL_SATURACION = 32000; //Cuentas. Por encima se considera que el ADS satura
@@ -67,6 +68,7 @@ ADS119X adc(dataReady_Pin,reset_pin , cs_pin, clk_pin, miso_pin, mosi_pin);
 //Variables del ADS para utilidades
 volatile uint32_t contadorDRDY=0;
 uint32_t muestrasProcesadas=0;
+TaskHandle_t tareaADS = NULL; //Tarea que lee el ADS (la despierta la interrupcion)
 //Variables del ADS para hacer test
 bool testADS = false;
 const byte testModeRuidoInterno = 0x00;
@@ -74,7 +76,7 @@ const byte testModeSignalCuadrada = 0x01;
 const byte testModeSignalDC = 0x02;
 //Variables del ADS para configuracion
 const byte N_CHNLS_TOTALES = 0x08;
-const byte adsGanancia = ADS119X_CHnSET_GAIN_4;
+const byte adsGanancia = ADS119X_CHnSET_GAIN_12;
 const byte adsSPS = ADS119X_DRATE_500SPS;
 
 //Preconfiguraciones para registros
@@ -117,6 +119,7 @@ void initEspNow() {
   WiFi.setSleep(false);
   esp_wifi_set_channel(CANAL_ESPNOW,WIFI_SECOND_CHAN_NONE);
   if (esp_now_init() != ESP_OK) { ESP.restart(); }
+  esp_wifi_set_max_tx_power(20); //20 = 5 dBm (unidades de 0,25 dBm; por defecto ~20 dBm)
   esp_now_register_send_cb(onSent);
 
   esp_now_peer_info_t peer = {};
@@ -131,7 +134,7 @@ void configurarFiltros(){
   for(int ch=0;ch<N_CHNLS;ch++){
     filtros[ch].iniciar(FS_HZ);
     filtros[ch].pasoAlto(FC_PASO_ALTO);
-    filtros[ch].notch(F_NOTCH, Q_NOTCH);
+    for(int k=0;k<N_NOTCH;k++) filtros[ch].notch(F_NOTCH[k], Q_NOTCH[k]);
     if (FC_PASO_BAJO > 0.0f) filtros[ch].pasoBajo(FC_PASO_BAJO);
   }
 }
@@ -191,8 +194,24 @@ void procesarMuestra() {
 //Interrupcion ADS. DataReady (cada vez que recibo un valor )
 void IRAM_ATTR dataReadyADS(){
   contadorDRDY++;
+  BaseType_t despertar = pdFALSE;
+  vTaskNotifyGiveFromISR(tareaADS, &despertar); //Avisa a la tarea de adquisicion
+  portYIELD_FROM_ISR(despertar); //Si tiene mas prioridad que lo que se ejecutaba, pasa a ella ya
 }
 
+//=================TAREA DE ADQUISICION====================
+//Lee y procesa cada muestra. Tiene mas prioridad que loop(), asi que las pausas
+//de loop() (el nucleo Arduino la para ~5 ms cada 2 s) ya no hacen perder muestras.
+void tareaAdquisicion(void *param){
+  for(;;){
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY); //Duerme hasta que la interrupcion avisa
+    uint32_t llegadas = contadorDRDY; //Copia del contador de la interrupcion
+    if (llegadas - muestrasProcesadas > 1) muestrasPerdidas += llegadas - muestrasProcesadas - 1;
+    muestrasProcesadas = llegadas;
+    adc.readChannelData();
+    procesarMuestra();
+  }
+}
 //=========================================================
 
 /*Esta funcion prepara el ADS respetando orden y tiempos especificados en el datasheet.
@@ -256,7 +275,7 @@ void configurarADS(){
   // Stop continuous conversion, and send commands to configure (un poco de ingles por si te parecia aburrido)
   adc.sendCommand (ADS119X_CMD_SDATAC);
   
-  // ========== CAMBIO CRÍTICO 1: GANANCIA REDUCIDA ==========
+  // ========== CAMBIO CRÍTICO 1 ==========
   adc.setAllChannelGain(adsGanancia);
   adc.setAllChannelMux(ADS119X_CHnSET_MUX_NORMAL); //Este método activa todos los canales
 
@@ -270,7 +289,7 @@ void configurarADS(){
   adc.sendCommand(ADS119X_CMD_RDATAC);  
 }
 
-/*Esta funcion decide si los datos que imprime printData() son muestras EMG o señales de prueba.
+/*Esta funcion decide si los datos son muestras EMG o señales de prueba.
 testear: Define si se hace el test o no
 modo: Define que tipo de test quiere hacerse
 Si testear = false la funcion no hace nada*/
@@ -291,7 +310,6 @@ void testearADS(bool testear, byte modo){
     }
   }
 }
-
 
 void configurarRLD(){
 
@@ -315,15 +333,10 @@ void setup() {
   configurarFiltros();
   initPaquete();
   initEspNow();
+  xTaskCreate(tareaAdquisicion, "adquisicion", 4096, NULL, 10, &tareaADS); //Antes de activar la interrupcion
   attachInterrupt(digitalPinToInterrupt(dataReady_Pin),dataReadyADS,FALLING);
 }
 
 void loop() {
-  uint32_t llegadas=contadorDRDY;
-  if(llegadas!=muestrasProcesadas){
-    if (llegadas - muestrasProcesadas > 1) muestrasPerdidas += llegadas - muestrasProcesadas - 1;
-    muestrasProcesadas = llegadas;
-    adc.readChannelData();
-    procesarMuestra();
-  }
+  vTaskDelay(pdMS_TO_TICKS(1000)); //Todo el trabajo lo hace tareaAdquisicion; loop() solo espera
 }
