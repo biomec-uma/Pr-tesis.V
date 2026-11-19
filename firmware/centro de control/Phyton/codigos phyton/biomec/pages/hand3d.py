@@ -24,13 +24,14 @@ import time
 from math import radians, tan
 
 import numpy as np
-from PySide6.QtCore import QSize, Qt, QTimer
+from PySide6.QtCore import QSettings, QSize, Qt, QTimer
 from PySide6.QtGui import QMatrix4x4
 from PySide6.QtWidgets import (
-    QCheckBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSlider, QSizePolicy,
+    QCheckBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QMenu, QPushButton, QScrollArea, QSlider, QSizePolicy,
     QToolButton, QVBoxLayout, QWidget,
 )
 
+from .. import APP_NAME, ORG_NAME
 from ..core.gestures import ABIERTO, CERRADO, GESTOS, Gesto
 from ..core.hand_model import DEDOS, HandModel, frustum
 from ..core.postures import posture_command, posture_spec
@@ -150,6 +151,7 @@ class Hand3DPage(BasePage):
         self.model = None
         self.view = None
         self.items = {}
+        self.intro = None   # presentación animada (pages/hand_intro.py), se crea al pedirla
 
         self.twin_widget = self._build_twin()
         self.posture_widget = self._build_posture_widget()
@@ -178,6 +180,14 @@ class Hand3DPage(BasePage):
         self.cam_group.idClicked.connect(lambda i: self.set_camera(list(CAMERAS)[i]))
         top.addWidget(cam_seg)
         top.addStretch(1)
+        self.present_btn = self.button("Mostrar", None, "ghost",
+                                       "Presentación animada de la mano (para demostraciones): se dibuja, se monta "
+                                       "pieza a pieza y mueve los dedos. Clic en la vista para saltarla.\n"
+                                       "Clic derecho: elegir si sale al abrir la app.")
+        self.present_btn.clicked.connect(lambda: self.present())
+        self.present_btn.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.present_btn.customContextMenuRequested.connect(self._present_menu)
+        top.addWidget(self.present_btn)
         layout.addLayout(top)
 
         problem = None
@@ -189,6 +199,7 @@ class Hand3DPage(BasePage):
             except Exception as error:  # noqa: BLE001
                 problem = f"No se pudo cargar el modelo 3D:\n{error}"
         if problem:
+            self.present_btn.hide()
             msg = QLabel(problem)
             msg.setWordWrap(True)
             msg.setAlignment(Qt.AlignCenter)
@@ -304,6 +315,42 @@ class Hand3DPage(BasePage):
 
     def reset_camera(self) -> None:
         self.set_camera("¾")
+
+    def present(self, at_startup: bool = False) -> None:
+        """Presentación animada: la mano se dibuja, se monta, se vuelve sólida y mueve los dedos."""
+        if self.model is None:
+            return
+        if self.intro is None:
+            from .hand_intro import HandIntro
+            self.intro = HandIntro(self)
+        self.intro.start(at_startup=at_startup)
+
+    # Presentación al abrir la app (activada por defecto; se quita con clic derecho en Mostrar o Ctrl+K)
+    @property
+    def present_on_start(self) -> bool:
+        return QSettings(ORG_NAME, APP_NAME).value("intro/al_iniciar", True, type=bool)
+
+    @present_on_start.setter
+    def present_on_start(self, on: bool) -> None:
+        QSettings(ORG_NAME, APP_NAME).setValue("intro/al_iniciar", bool(on))
+        self.ctx.notify("La presentación saldrá al abrir la app." if on else
+                        "La presentación ya no saldrá al abrir la app (sigue en el botón Mostrar).")
+
+    def _present_menu(self, pos) -> None:
+        menu = QMenu(self.present_btn)
+        play = menu.addAction("Mostrar ahora")
+        startup = menu.addAction("Al abrir la app")
+        startup.setCheckable(True)
+        startup.setChecked(self.present_on_start)
+        chosen = menu.exec(self.present_btn.mapToGlobal(pos))
+        if chosen is play:
+            self.present()
+        elif chosen is startup:
+            self.present_on_start = startup.isChecked()
+
+    @property
+    def presenting(self) -> bool:
+        return self.intro is not None and self.intro.running
 
     # ===================================================== ventana Posturas
     def _build_posture_widget(self) -> QWidget:
@@ -652,7 +699,7 @@ class Hand3DPage(BasePage):
             self.thumb_ctrl.blockSignals(False)
             self.thumb_value.setText(f"{round(self.thumb_target)}°")
 
-        if self.model is None or not self.view.isVisible():
+        if self.model is None or not self.view.isVisible() or self.presenting:
             return
         self._apply_colors()
         state = (tuple(round(self.flex[d], 3) for d in DEDOS), round(self.thumb_now, 1))

@@ -110,6 +110,9 @@ manda su señal al PC en marcos binarios AA 55 (los mismos que el receptor EMG d
 de las líneas de texto. @EMG 0 deja de mandarla y @EMG 1 la reactiva (arranca activado).
 - Modo simulación: una mano y un «paciente virtual» simulados dentro de la app responden igual que el \
 hardware, sin mover nada real.
+- C6 del móvil (firmware/puente_movil): otra C6, solo para demostraciones sin PC. Crea la Wi-Fi \
+«BIOMEC-Mano-XXXX» (clave biomecuma) con una página en http://192.168.4.1 para mover la mano desde \
+cualquier móvil. Puede estar encendida a la vez que la del PC: manda la última orden. No recibe EMG.
 
 # Protocolo (líneas de texto)
 DATA clave=valor (telemetría: PWM de cada dedo −255…255, + abre / − cierra; pulgar en grados; gesto) · \

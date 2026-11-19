@@ -572,6 +572,18 @@ class MainWindow(QMainWindow):
         super().showEvent(event)
         QTimer.singleShot(0, self._size_docks)  # el reparto de tamaños necesita la ventana ya en pantalla
 
+    def present_if_enabled(self) -> None:
+        """Al abrir la app (lo llama main.py): presentación del gemelo, si está activada y el gemelo se ve.
+        No cambia las ventanas: con el gemelo oculto o detrás de otra pestaña, no sale."""
+        if self.twin.model is None or not self.twin.present_on_start:
+            return
+
+        def go():
+            view = self.twin.view
+            if view is not None and view.isVisible() and view.height() >= 120:
+                self.twin.present(at_startup=True)
+        QTimer.singleShot(700, go)   # cuando las ventanas ya tienen su tamaño
+
     def _set_preset(self, name: str) -> None:
         self._preset = name
         self.settings.setValue("workspace/preset", name)
@@ -996,6 +1008,14 @@ class MainWindow(QMainWindow):
                 acts.append(PaletteAction(f"Vista 3D: {name}", "Gemelo digital", "camera",
                                           lambda n=name: (self.show_dock("gemelo"), self.twin.set_camera(n)),
                                           "camara"))
+            acts.append(PaletteAction("Mostrar la presentación de la mano", "Gemelo digital", "play",
+                                      lambda: (self.show_dock("gemelo"), self.twin.present()),
+                                      "presentacion intro animacion demostracion exposicion"))
+            on_start = self.twin.present_on_start
+            acts.append(PaletteAction("No mostrar la presentación al abrir la app" if on_start
+                                      else "Mostrar la presentación al abrir la app", "Gemelo digital", "play",
+                                      lambda v=not on_start: setattr(self.twin, "present_on_start", v),
+                                      "presentacion intro inicio arranque abrir"))
         quick = {"PARAR", "AUTO", "MANUAL", "ESTADO", "GESTO"}
         for cmd in ctx.catalog:
             if cmd.name in quick:

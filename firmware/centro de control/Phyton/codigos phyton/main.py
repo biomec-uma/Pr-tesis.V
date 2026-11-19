@@ -136,6 +136,9 @@ def main() -> int:
         global _app_mutex
         _app_mutex = ctypes.windll.kernel32.CreateMutexW(None, False, APP_MUTEX)
 
+    # Todas las vistas 3D comparten sus recursos de OpenGL. Si no, al sacar el gemelo a una ventana
+    # flotante Qt le crea otro contexto y los sombreadores ya compilados no valen: la mano no se dibuja.
+    QApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setOrganizationName(ORG_NAME)
@@ -154,6 +157,7 @@ def main() -> int:
     window = MainWindow(ctx)
     window.show()
     splash.finish(window)
+    window.present_if_enabled()   # presentación animada de la mano (se quita con clic derecho en Mostrar)
     ctx.notify(f"{APP_NAME} iniciada. {len(catalog.names())} comandos cargados.  Pulsa Ctrl+K para la paleta de comandos.")
     return app.exec()
 

@@ -157,17 +157,18 @@ def stylesheet(theme: str) -> str:
     QPushButton#toggleChip:disabled {{ color: {p['subtle']}; }}
 
     /* ---------- entradas ---------- */
-    QLineEdit, QComboBox, QSpinBox {{ background: {p['inset']}; border: 1px solid {p['border']}; border-radius: 8px;
+    /* QAbstractSpinBox = QSpinBox y QDoubleSpinBox (con solo QSpinBox, las de decimales salían grises) */
+    QLineEdit, QComboBox, QAbstractSpinBox {{ background: {p['inset']}; border: 1px solid {p['border']}; border-radius: 8px;
         padding: 6px 10px; color: {p['text']}; selection-background-color: {p['selection']}; min-height: 20px; }}
-    QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{ border-color: {p['accent']}; }}
-    QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled {{ color: {p['subtle']}; }}
+    QLineEdit:focus, QComboBox:focus, QAbstractSpinBox:focus {{ border-color: {p['accent']}; }}
+    QLineEdit:disabled, QComboBox:disabled, QAbstractSpinBox:disabled {{ color: {p['subtle']}; }}
     QComboBox::drop-down {{ border: 0; width: 24px; }}
     QComboBox::down-arrow {{ image: url({down}); width: 14px; height: 14px; }}
     QComboBox QAbstractItemView {{ background: {p['card']}; border: 1px solid {p['border_strong']}; border-radius: 8px;
         padding: 4px; selection-background-color: {p['accent_soft']}; selection-color: {p['text']}; outline: 0; }}
-    QSpinBox::up-button, QSpinBox::down-button {{ border: 0; width: 18px; background: transparent; }}
-    QSpinBox::up-arrow {{ image: url({up}); width: 12px; height: 12px; }}
-    QSpinBox::down-arrow {{ image: url({down}); width: 12px; height: 12px; }}
+    QAbstractSpinBox::up-button, QAbstractSpinBox::down-button {{ border: 0; width: 18px; background: transparent; }}
+    QAbstractSpinBox::up-arrow {{ image: url({up}); width: 12px; height: 12px; }}
+    QAbstractSpinBox::down-arrow {{ image: url({down}); width: 12px; height: 12px; }}
 
     QPlainTextEdit, QTextEdit {{ background: {p['inset']}; border: 1px solid {p['border']}; border-radius: 10px;
         padding: 8px; color: {p['text']}; selection-background-color: {p['selection']}; }}

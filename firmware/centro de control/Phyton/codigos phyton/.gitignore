@@ -6,3 +6,4 @@ dist/
 *.spec
 assets/biomec.ico
 ~$*
+.pio/

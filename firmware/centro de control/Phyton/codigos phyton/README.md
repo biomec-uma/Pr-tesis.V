@@ -294,6 +294,37 @@ Clic derecho en el micrófono: la lista completa. Seguridad: solo se ejecuta una
 confianza alta; «para» se acepta siempre. Con la mano real pide confirmación al activarlo, y
 Parar/Esc siguen funcionando. Está en `biomec/core/voice.py` y `biomec/ui/voice.py`.
 
+## Mover la mano desde el móvil (demostraciones)
+
+Para enseñar la mano sin PC ni app: una **segunda C6** con el firmware `firmware/puente_movil` crea
+su propia red Wi-Fi con una página de botones. Vale cualquier móvil (iPhone o Android) y no hay que
+instalar nada.
+
+1. Enciende la mano y la C6 del móvil (basta un cargador o una batería USB).
+2. En el móvil, conéctate a la Wi-Fi **`BIOMEC-Mano-XXXX`** (clave: `biomecuma`; XXXX es el final de
+   la MAC de esa C6).
+3. La página se abre sola («Iniciar sesión en la red»). Si no, abre **http://192.168.4.1** en el
+   navegador. Si el móvil avisa de que la red no tiene internet, dile que siga conectado; en Android,
+   si no carga, quita los datos móviles un momento.
+
+La página tiene Abrir/Cerrar, los 8 gestos, cada dedo, el pulgar, el modo demo y un botón **PARAR**
+siempre visible abajo, y enseña el estado de la mano (gesto, posición de cada dedo y si responde).
+No tiene entrenamiento EMG, gráficas ni asistente: eso sigue en la app del PC.
+
+- La C6 del PC no se toca: la mano obedece a cualquier C6 del canal 1, así que las dos pueden estar
+  encendidas a la vez y **manda la última orden** (en una demo, que controle una sola persona). La
+  del móvil no recibe EMG: el sensor solo envía a la C6 del PC.
+- Desde la página solo se pueden mandar comandos de mover la mano y `ESTADO` (`PERMITIDOS[]` en
+  `puente_movil.cpp`); la mano vuelve a comprobar los argumentos.
+- LED de la C6: blanco tenue sin móviles, verde con un móvil conectado, azul al mandar una orden.
+- **Ver la interfaz sin nada conectado**: abre `firmware\puente_movil\web\index.html` en el navegador
+  (doble clic). Entra en **vista previa**: los botones funcionan, pero solo cambian lo que se ve, con
+  una mano de mentira dentro de la propia página. En la C6 nunca entra sola en vista previa: si se
+  corta la conexión, avisa de «Sin conexión».
+- Probarla con la mano simulada de la app (la misma lógica que el modo simulación): doble clic en
+  `firmware\puente_movil\probar_en_el_pc.bat` y se abre sola en http://127.0.0.1:8080. Deja abierta su
+  ventana mientras pruebas. Con `--red`, también desde un móvil en la misma Wi-Fi que el PC.
+
 ## Asistente IA (Claude)
 
 Panel **Asistente IA** (Ctrl+I): preguntas sobre la mano, la app o un error («¿por
@@ -341,6 +372,7 @@ biomec/
     updates.py             Actualizaciones: versiones en GitHub, descarga y huella SHA-256
     secrets.py             Guardar la clave de API cifrada (DPAPI)
     hand_model.py          Carga los STL, resuelve el mecanismo de los dedos y el encuadre de la vista 3D
+    hand_intro.py          Guion de la presentación animada del gemelo (tiempos, cámara, etiquetas, gestos)
     signals.py             Señales de las gráficas: catálogo, almacén, derivadas y marcas de comandos
     emg_receiver.py        Receptor EMG del equipo por USB (marcos AA 55), estadísticas y grabación en CSV
     emg_analysis.py        Analizador EMG: el analizador de MATLAB del equipo en numpy
@@ -349,6 +381,7 @@ biomec/
     docks.py               Ventana acoplable/flotante (Dock) y barra lateral plegable (Rail)
   pages/                 EL CONTENIDO DE CADA VENTANA
     hand3d.py              Gemelo digital (vista 3D) y Posturas
+    hand_intro.py          Dibujo de la presentación: sombreador del barrido, líneas de plano y etiquetas
     telemetry.py           Gráficas (GraphPanel; una por ventana) y selector de señales
     emg.py                 Entrenamiento (EMG)
     emg_viewer.py          Visor EMG
@@ -359,8 +392,12 @@ biomec/
 firmware/
   puente_pc/             C6 conectada al PC: puente de la mano y receptor EMG (con y sin placa EMG)
                          (cada firmware es un proyecto de PlatformIO: platformio.ini + src/*.cpp)
+  puente_movil/          Otra C6, para demostraciones: red Wi-Fi + página para mover la mano desde el móvil
+                         (web/index.html → include/pagina_web.h; simular_movil.py la prueba en el PC)
   mano/                  ESP32-WROOM de la mano (gestos, posturas, comandos y telemetría)
   bucle_exposiciones/    La mano sola, sin radio: recorre los gestos (exposiciones y prueba de hardware)
+  emg_gravity/           Prueba de los sensores EMG en seco Gravity (OYMotion) con una ESP32 DevKit V1
+docs/manual/            Manual de uso en PDF (manual.html + capturas.py hace las capturas en simulación + generar_pdf.ps1)
 tests/                   Pruebas automáticas (tests/data: una muestra EMG del equipo con sus resultados de MATLAB)
 ```
 
@@ -406,6 +443,25 @@ moviéndose como la mano. Cada dedo es un mecanismo de barras que se resuelve en
 La posición se estima integrando el PWM de la telemetría (`STREAM 1`), porque la
 mano no tiene sensores de posición. Ajustar en `mano3d.json`:
 `flexion_max_grados` (cuánto cierra un dedo) y `tiempo_cierre_s` (lo que tarda).
+
+**Mostrar** (botón arriba a la derecha del gemelo, o «Mostrar la presentación de la mano» en Ctrl+K): presentación
+animada de unos 14 s para demostraciones y exposiciones.
+1. La mano aparece dibujada en líneas, como un plano.
+2. Las piezas llegan y se montan una a una.
+3. Un barrido con el borde brillante la vuelve sólida de la muñeca a las puntas.
+4. Salen etiquetas con sus partes.
+5. Hace un puño y señala con su mecanismo real, y aparece el título.
+
+Se salta con un clic en la vista o con «Saltar» (Esc sigue siendo Parar los motores). Al acabar, el
+gemelo vuelve a seguir a la mano.
+
+**Sale sola al abrir la app** si el gemelo está a la vista en ese espacio de trabajo (no cambia las
+ventanas). Para quitarla: clic derecho en **Mostrar → Al abrir la app**, o «No mostrar la presentación al
+abrir la app» en Ctrl+K. Se guarda en los ajustes (`intro/al_iniciar`). La lanza `main.py`, no la
+ventana: las capturas del manual y las pruebas no la ven. El guion (tiempos, cámara, etiquetas, gestos) está en
+`biomec/core/hand_intro.py` y el dibujo en `biomec/pages/hand_intro.py`: un sombreador que solo pinta
+lo que queda por debajo del barrido y las aristas de cada STL como líneas. Para cambiar los textos de
+las etiquetas o los gestos del final, basta con tocar `CALLOUTS` y `GESTURES` en el guion.
 
 El encuadre de la vista usa un campo de visión **vertical** fijo (`frustum()` en `hand_model.py`):
 la escala de la mano depende solo del alto de la ventana. pyqtgraph lo fija en horizontal, y al
@@ -470,7 +526,7 @@ tiene cabeceras), como los del resto del equipo. Para compilar y subir: en VS Co
 **abrir la carpeta de ese firmware** (la que tiene su `platformio.ini`) y pulsar *Upload*. La placa, el
 core (pioarduino 54.03.21 = Arduino 3.x) y las librerías ya vienen en el `platformio.ini`.
 
-- Dónde está: `firmware/puente_pc`, `firmware/mano` y `firmware/bucle_exposiciones` junto a la app
+- Dónde está: `firmware/puente_pc`, `firmware/mano`, `firmware/bucle_exposiciones` y `firmware/emg_gravity` junto a la app
   o, en el repositorio del equipo, `firmware/centro de control/maestro/c6` (puente),
   `…/maestro/mano` y `…/maestro/bucle_exposiciones`. (La carpeta `maestro` en sí es el receptor EMG
   del equipo, otro proyecto.)
@@ -493,7 +549,26 @@ core (pioarduino 54.03.21 = Arduino 3.x) y las librerías ya vienen en el `platf
   (grupo de baja velocidad de la ESP32) no se movían.
 - Todos con el core esp32 ≥ 3.0 (la API de LEDC/timers del core 2.x ya no existe). Con Arduino IDE
   también se puede: crear un sketch con el nombre del firmware y copiar dentro su `.cpp` y su `.h`.
-- `biomec_protocol.h` está duplicado en `puente_pc/include` y `mano/include`: si lo cambias, cópialo
-  en ambas.
+- `emg_gravity` → **ESP32 DevKit V1** con los sensores EMG en seco **Gravity** (OYMotion, DFRobot
+  SEN0240). Es el ejemplo de OYMotion pasado a la ESP32. Conexión: `+` a 3V3, `-` a GND y `A` a
+  **GPIO36 (VP)**. Más sensores: añade sus pines en `PINES_EMG[]`, solo del ADC1 (36, 39, 34, 35);
+  el ADC2 no funciona con la radio encendida. Lleva en `lib/` la librería **EMGFilters corregida**:
+  la original comparte los filtros entre todos los sensores y le falta una coma en el notch de 50 Hz
+  a 500 Hz (lo comprueba `tests/test_emg_gravity_filtros.py`). Se maneja con comandos en el monitor
+  serie (115200):
+  - `CALIBRAR`: 3 s con el músculo relajado. Después, el LED azul se enciende al contraer.
+  - `MODO PLOTTER`: envolvente y umbral para el Serial Plotter.
+  - `MODO APP`: líneas `EMG …` a 500 Hz y `DATA emg1_env=…`. Conecta la app al COM de la DevKit
+    para ver la señal en las gráficas EMG y en el Visor.
+  - `INFO`: voltios en reposo (~1,5 V), saturación y ritmo real.
+  - `NOTCH 0|1`: quita o pone el filtro de 50 Hz, para ver cuánto zumbido hay.
+- `puente_movil` → otra ESP32-C6 (mismos entornos `devkitc` y `c6zero` que `puente_pc`): punto de
+  acceso Wi-Fi en el canal 1 (el de la mano) + página web + ESP-NOW a la mano. Nombre de la red y clave
+  en `WIFI_NOMBRE` / `WIFI_CLAVE`. La página se edita en `web/index.html`; al compilar,
+  `incrustar_web.py` la copia en `include/pagina_web.h` (con Arduino IDE, ejecútalo antes a mano).
+  Todo va dentro de la página: la red no tiene internet. Por USB saca los mensajes de la mano y
+  acepta comandos, como un puente sin EMG (`@PING`, `@INFO`).
+- `biomec_protocol.h` está duplicado en `puente_pc/include`, `puente_movil/include` y
+  `mano/include`: si lo cambias, cópialo en todas.
 - Por defecto las placas usan broadcast. Cuando sepas las MAC (las imprimen al arrancar, o con `@INFO`),
   ponlas en `HAND_MAC` y `BRIDGE_MAC` para que solo se hablen entre ellas.

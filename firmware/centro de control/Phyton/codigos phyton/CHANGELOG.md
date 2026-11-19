@@ -16,6 +16,16 @@ Para publicar una versión: sube `APP_VERSION`, añade aquí su apartado y ejecu
   Entrenamiento, a las Gráficas y a las sesiones, y el Visor enseña los contadores de la C6.
 - Si la C6 conectada manda EMG pero no contesta a los comandos (tiene el firmware del receptor del equipo,
   que no habla con la mano), la app lo detecta y explica qué firmware subirle.
+- **Presentación de la mano** (botón Mostrar en el Gemelo digital): una presentación animada para demostraciones. La
+  mano se dibuja en líneas como un plano, se monta pieza a pieza, un barrido brillante la vuelve sólida,
+  salen etiquetas con sus partes y termina haciendo un puño y señalando. Se salta con un clic. Sale sola
+  al abrir la app (con el gemelo a la vista); se quita con clic derecho en Mostrar.
+- El gemelo digital se sigue dibujando al sacarlo a una ventana flotante (antes la mano desaparecía).
+- Modo oscuro: las casillas de números con decimales (Analizador y Visor EMG) ya no salen en gris claro.
+- **Mover la mano desde el móvil** (para demostraciones sin PC): una segunda C6 con el firmware nuevo
+  `firmware/puente_movil` crea la Wi-Fi `BIOMEC-Mano-XXXX` con una página de botones (Abrir/Cerrar,
+  gestos, dedos, pulgar, modo demo y PARAR) que funciona en cualquier iPhone o Android sin instalar
+  nada. La C6 del PC sigue igual. Se puede probar en el PC con `simular_movil.py`.
 - **Firmware en `.cpp`**: el puente, la mano y el bucle de exposiciones son ahora proyectos de
   PlatformIO (`platformio.ini` + `src/*.cpp`), como el resto del equipo. Se abre la carpeta y se sube.
 - Visor EMG: la lista de puertos se vuelve a buscar al abrirla y al pulsar Conectar (antes, una C6
