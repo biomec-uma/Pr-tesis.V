@@ -25,6 +25,7 @@ const float F_NOTCH[] = {50.0f, 100.0f, 150.0f, 200.0f}; //Hz. Red electrica y s
 const float Q_NOTCH[] = {20.0f, 35.0f, 35.0f, 35.0f}; //Anchura de cada muesca (mas alto = mas estrecha)
 const int N_NOTCH = sizeof(F_NOTCH) / sizeof(F_NOTCH[0]); //Cuantos hay (maximo FiltroEMG::MAX_NOTCH)
 const float FC_PASO_BAJO = 0.0f; //Hz. 0 = desactivado (el ADS ya corta en ~130 Hz a 500 SPS)
+const float FC_ENVOLVENTE = 5.0f; //Hz. Paso bajo de la envolvente (5 Hz: ~48 ms de retardo). 0 = desactivada
 
 const int16_t UMBRAL_SATURACION = 32000; //Cuentas. Por encima se considera que el ADS satura
 //=============================================================
@@ -136,6 +137,7 @@ void configurarFiltros(){
     filtros[ch].pasoAlto(FC_PASO_ALTO);
     for(int k=0;k<N_NOTCH;k++) filtros[ch].notch(F_NOTCH[k], Q_NOTCH[k]);
     if (FC_PASO_BAJO > 0.0f) filtros[ch].pasoBajo(FC_PASO_BAJO);
+    if (FC_ENVOLVENTE > 0.0f) filtros[ch].envolvente(FC_ENVOLVENTE);
   }
 }
 
@@ -185,6 +187,7 @@ void procesarMuestra() {
 
   for(int ch=0;ch<N_CHNLS;ch++){
     fila[ch]=aInt16(filtros[ch].procesar(limpia[ch]));
+    //La envolvente de esta muestra ya esta calculada: filtros[ch].envolventeActual() (en µV)
   }
   guardarEnPaquete(fila);
 }

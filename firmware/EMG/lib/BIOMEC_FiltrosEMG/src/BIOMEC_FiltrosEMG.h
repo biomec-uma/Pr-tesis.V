@@ -66,6 +66,9 @@ public:
   void quitarPasoAlto();
   void quitarNotch();
   void quitarPasoBajo();
+  bool envolvente(float fc = 5.0f);      // activa la envolvente: |señal| + paso bajo de fc Hz
+  void quitarEnvolvente();
+  float envolventeActual() const { return env_; }  // envolvente de la última muestra procesada
 
   void reiniciar();                      // vacía la memoria de todas las etapas
   float procesar(float x);               // filtra UNA muestra
@@ -78,6 +81,9 @@ private:
   uint8_t nNotch_;
   Biquad pasoBajo_;
   bool pasoAltoActivo_, pasoBajoActivo_;
+  Biquad envolvente_;        // paso bajo de la envolvente
+  bool envolventeActiva_;
+  float env_;                // último valor de la envolvente
   bool primera_;      // true hasta recibir la primera muestra
   float offset0_;     // valor de la primera muestra (evita el salto inicial)
 };

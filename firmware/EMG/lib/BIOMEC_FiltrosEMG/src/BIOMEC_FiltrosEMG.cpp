@@ -71,6 +71,8 @@ void FiltroEMG::iniciar(float fs) {
   fs_ = fs;
   pasoAltoActivo_ = pasoBajoActivo_ = false;
   nNotch_ = 0;
+  envolventeActiva_ = false;
+  env_ = 0.0f;
   primera_ = true;
 }
 
@@ -108,11 +110,23 @@ void FiltroEMG::quitarPasoAlto() { pasoAltoActivo_ = false; }
 void FiltroEMG::quitarNotch() { nNotch_ = 0; }
 void FiltroEMG::quitarPasoBajo() { pasoBajoActivo_ = false; }
 
+// Envolvente: se rectifica la señal ya filtrada y se suaviza con un paso bajo
+// Butterworth de orden 2. A menor fc, curva más suave pero más retardo.
+bool FiltroEMG::envolvente(float fc) {
+  bool ok = envolvente_.configurarPasoBajo(fc, Q_BUTTER2, fs_);
+  envolventeActiva_ = ok;
+  env_ = 0.0f;
+  return ok;
+}
+
+void FiltroEMG::quitarEnvolvente() { envolventeActiva_ = false; env_ = 0.0f; }
 void FiltroEMG::reiniciar() {
   pasoAlto_[0].reiniciar();
   pasoAlto_[1].reiniciar();
   for (uint8_t i = 0; i < MAX_NOTCH; i++) notch_[i].reiniciar();
   pasoBajo_.reiniciar();
+  envolvente_.reiniciar();
+  env_ = 0.0f;
   primera_ = true;
 }
 
@@ -128,7 +142,11 @@ float FiltroEMG::procesar(float x) {
   }
   for (uint8_t i = 0; i < nNotch_; i++) y = notch_[i].procesar(y);
   if (pasoBajoActivo_) y = pasoBajo_.procesar(y);
-  return y;
+  if (envolventeActiva_) {
+    env_ = envolvente_.procesar(fabsf(y));  // rectificar y suavizar
+    if (env_ < 0.0f) env_ = 0.0f;           // el paso bajo puede bajar un pelo de 0 al caer
+  }
+  return y;  // la salida sigue siendo la señal filtrada
 }
 
 // =============================================================================
