@@ -14,7 +14,8 @@
 #define DNI 2 //Version del FORMATO del paquete (2 = con modo y diagnostico al final)
 #define MODO_CRUDO 0 //Campo modo: data[] son cuentas del ADS sin procesar
 #define MODO_FILTRADO 1 //Campo modo: data[] son microvoltios filtrados
-
+#define MODO_ENVOLVENTE 2 //Campo modo: data[] es la envolvente en µV
+#define ENVIAR_ENVOLVENTE 1 //1 = envia la envolvente en vez de la señal filtrada (prueba) | 0 = señal filtrada
 const float FS_HZ = 500.0f; //Frecuencia de muestreo. DEBE coincidir con adsSPS
 const float GANANCIA_NUM = 12.0f; //Ganancia en numero. DEBE coincidir con adsGanancia
 const float VREF_V = 2.4f; //Referencia interna del ADS (CONFIG3 = 0xCC -> 2,4 V)
@@ -106,7 +107,7 @@ uint32_t muestrasPerdidas = 0; //Muestras que llegaron sin que loop() pudiera le
 //Función para inicializar las ctes del paquete
 void initPaquete(){
   pkt.version=DNI;
-  pkt.modo=enviarFiltrado ? MODO_FILTRADO : MODO_CRUDO;
+  pkt.modo= !enviarFiltrado ? MODO_CRUDO : (ENVIAR_ENVOLVENTE ? MODO_ENVOLVENTE : MODO_FILTRADO);
   pkt.nChnls=N_CHNLS; 
   pkt.batch=BATCH;
 }
@@ -186,8 +187,8 @@ void procesarMuestra() {
   if(!limpiador.procesar(entrada, limpia)) return; //Las 2 primeras muestras no tienen salida
 
   for(int ch=0;ch<N_CHNLS;ch++){
-    fila[ch]=aInt16(filtros[ch].procesar(limpia[ch]));
-    //La envolvente de esta muestra ya esta calculada: filtros[ch].envolventeActual() (en µV)
+    float y=filtros[ch].procesar(limpia[ch]); //Señal filtrada (y calcula la envolvente)
+    fila[ch]=aInt16(ENVIAR_ENVOLVENTE ? filtros[ch].envolventeActual() : y);
   }
   guardarEnPaquete(fila);
 }
