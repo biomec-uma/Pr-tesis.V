@@ -47,6 +47,40 @@ private:
 };
 
 // -----------------------------------------------------------------------------
+//  Peine (comb notch IIR): quita f0 y todos sus armónicos (2·f0, 3·f0...) con
+//  un solo filtro y ~4 operaciones por muestra.
+//    y[n] = k·(x[n] - x[n-N]) + R·y[n-N],   N = fs/f0,   k = (1+R)/2
+//  Implementado con un solo buffer: w[n] = x[n] + R·w[n-N];  y[n] = k·(w[n] - w[n-N])
+//  - fs/f0 debe ser entero (500/50 = 10, 1000/50 = 20).
+//  - R (0..1) hace de Q: más cerca de 1 = muescas más estrechas pero más lentas
+//    en asentarse. 0,9 -> muesca de 50 Hz de ~1,7 Hz de ancho, asienta en ~0,6 s.
+//  - También pone una muesca en 0 Hz (no sustituye al paso alto).
+// -----------------------------------------------------------------------------
+class Peine {
+public:
+  static const uint8_t MAX_RETARDO = 40;  // N máximo (p. ej. 2000 SPS / 50 Hz)
+
+  Peine();
+
+  // Devuelve false si fs/f0 no es entero, N no cabe o R no está entre 0 y 1.
+  bool configurar(float f0, float R, float fs);
+  void reiniciar();
+
+  inline float procesar(float x) {
+    float wViejo = w_[pos_];          // w[n-N]
+    float w = x + R_ * wViejo;        // w[n]
+    w_[pos_] = w;                     // se guarda en el hueco que se acaba de leer
+    if (++pos_ >= N_) pos_ = 0;
+    return k_ * (w - wViejo);
+  }
+
+private:
+  float w_[MAX_RETARDO];  // últimos N valores de w (buffer circular)
+  uint8_t N_, pos_;
+  float R_, k_;
+};
+
+// -----------------------------------------------------------------------------
 //  FiltroEMG: cadena de filtros para UN canal.
 //  Orden fijo de procesado: paso alto -> notch -> paso bajo.
 //  Cada etapa se activa al configurarla y se puede desactivar.
@@ -60,11 +94,13 @@ public:
 
   bool pasoAlto(float fc);               // Butterworth orden 4 (2 biquads)
   bool notch(float f0, float Q = 35.0f); // notch de 2º orden
+  bool peine(float f0 = 50.0f, float R = 0.9f);  // quita f0 y todos sus armónicos (alternativa a varios notch)
   bool pasoBajo(float fc);               // Butterworth orden 2 (1 biquad)
   bool pasaBanda(float fBaja, float fAlta);  // = pasoAlto(fBaja) + pasoBajo(fAlta)
 
   void quitarPasoAlto();
   void quitarNotch();
+  void quitarPeine();
   void quitarPasoBajo();
   bool envolvente(float fc = 5.0f);      // activa la envolvente: |señal| + paso bajo de fc Hz
   void quitarEnvolvente();
@@ -79,6 +115,8 @@ private:
   Biquad notch_[MAX_NOTCH];
   float fNotch_[MAX_NOTCH]; 
   uint8_t nNotch_;
+  Peine peine_;
+  bool peineActivo_;
   Biquad pasoBajo_;
   bool pasoAltoActivo_, pasoBajoActivo_;
   Biquad envolvente_;        // paso bajo de la envolvente

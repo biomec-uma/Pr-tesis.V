@@ -27,6 +27,9 @@ const float Q_NOTCH[] = {20.0f, 35.0f, 35.0f, 35.0f}; //Anchura de cada muesca (
 const int N_NOTCH = sizeof(F_NOTCH) / sizeof(F_NOTCH[0]); //Cuantos hay (maximo FiltroEMG::MAX_NOTCH)
 const float FC_PASO_BAJO = 0.0f; //Hz. 0 = desactivado (el ADS ya corta en ~130 Hz a 500 SPS)
 const float FC_ENVOLVENTE = 5.0f; //Hz. Paso bajo de la envolvente (5 Hz: ~48 ms de retardo). 0 = desactivada
+const float F_PEINE = 0.0f; //Hz. 50 = usa el filtro peine EN VEZ de los notch (quita 50 y todos sus armonicos). 0 = usa los notch
+const float R_PEINE = 0.9f; //Anchura de las muescas del peine (0..1, mas cerca de 1 = mas estrechas)
+
 
 const int16_t UMBRAL_SATURACION = 32000; //Cuentas. Por encima se considera que el ADS satura
 //=============================================================
@@ -133,10 +136,15 @@ void initEspNow() {
 
 //Configura la cadena de filtros de todos los canales con los valores de arriba
 void configurarFiltros(){
+
   for(int ch=0;ch<N_CHNLS;ch++){
     filtros[ch].iniciar(FS_HZ);
     filtros[ch].pasoAlto(FC_PASO_ALTO);
     for(int k=0;k<N_NOTCH;k++) filtros[ch].notch(F_NOTCH[k], Q_NOTCH[k]);
+    /*Función de peine, en caso de usar este se debería de quitar el Notch, de momento es mejor el Notch pero conviene cambiarlo cuando se haga el ML para menos calculos
+    if (F_PEINE > 0.0f) filtros[ch].peine(F_PEINE, R_PEINE); //Peine: un solo filtro para red y armonicos
+    else for(int k=0;k<N_NOTCH;k++) filtros[ch].notch(F_NOTCH[k], Q_NOTCH[k]); //Notch: uno por frecuencia
+    */
     if (FC_PASO_BAJO > 0.0f) filtros[ch].pasoBajo(FC_PASO_BAJO);
     if (FC_ENVOLVENTE > 0.0f) filtros[ch].envolvente(FC_ENVOLVENTE);
   }

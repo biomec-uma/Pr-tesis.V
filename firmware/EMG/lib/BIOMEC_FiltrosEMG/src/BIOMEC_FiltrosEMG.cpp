@@ -61,16 +61,40 @@ bool Biquad::configurarPasoBajo(float fc, float Q, float fs) {
 }
 
 // =============================================================================
+//  Peine
+// =============================================================================
+Peine::Peine() : N_(1), pos_(0), R_(0.0f), k_(1.0f) { reiniciar(); }
+
+void Peine::reiniciar() {
+  for (uint8_t i = 0; i < MAX_RETARDO; i++) w_[i] = 0.0f;
+  pos_ = 0;
+}
+
+bool Peine::configurar(float f0, float R, float fs) {
+  if (f0 <= 0.0f || f0 >= fs / 2.0f || R <= 0.0f || R >= 1.0f) return false;
+  float muestrasPorCiclo = fs / f0;
+  long N = lroundf(muestrasPorCiclo);
+  if (fabsf(muestrasPorCiclo - (float)N) > 0.01f) return false;  // fs/f0 no es entero
+  if (N < 2 || N > MAX_RETARDO) return false;
+  N_ = (uint8_t)N;
+  R_ = R;
+  k_ = (1.0f + R) / 2.0f;  // ganancia 1 entre muescas
+  reiniciar();
+  return true;
+}
+
+// =============================================================================
 //  FiltroEMG
 // =============================================================================
 FiltroEMG::FiltroEMG()
-    : fs_(500.0f), nNotch_(0), pasoAltoActivo_(false), pasoBajoActivo_(false),
+        : fs_(500.0f), nNotch_(0), peineActivo_(false), pasoAltoActivo_(false), pasoBajoActivo_(false),
       primera_(true), offset0_(0.0f) {}
 
 void FiltroEMG::iniciar(float fs) {
   fs_ = fs;
   pasoAltoActivo_ = pasoBajoActivo_ = false;
   nNotch_ = 0;
+  peineActivo_ = false;
   envolventeActiva_ = false;
   env_ = 0.0f;
   primera_ = true;
@@ -95,6 +119,13 @@ bool FiltroEMG::notch(float f0, float Q) {
   return true;
 }
 
+// Peine: quita f0 y todos sus armónicos de una vez (ver clase Peine).
+bool FiltroEMG::peine(float f0, float R) {
+  bool ok = peine_.configurar(f0, R, fs_);
+  peineActivo_ = ok;
+  return ok;
+}
+
 bool FiltroEMG::pasoBajo(float fc) {
   bool ok = pasoBajo_.configurarPasoBajo(fc, Q_BUTTER2, fs_);
   pasoBajoActivo_ = ok;
@@ -108,6 +139,7 @@ bool FiltroEMG::pasaBanda(float fBaja, float fAlta) {
 
 void FiltroEMG::quitarPasoAlto() { pasoAltoActivo_ = false; }
 void FiltroEMG::quitarNotch() { nNotch_ = 0; }
+void FiltroEMG::quitarPeine() { peineActivo_ = false; }
 void FiltroEMG::quitarPasoBajo() { pasoBajoActivo_ = false; }
 
 // Envolvente: se rectifica la señal ya filtrada y se suaviza con un paso bajo
@@ -124,6 +156,7 @@ void FiltroEMG::reiniciar() {
   pasoAlto_[0].reiniciar();
   pasoAlto_[1].reiniciar();
   for (uint8_t i = 0; i < MAX_NOTCH; i++) notch_[i].reiniciar();
+  peine_.reiniciar();
   pasoBajo_.reiniciar();
   envolvente_.reiniciar();
   env_ = 0.0f;
@@ -141,6 +174,7 @@ float FiltroEMG::procesar(float x) {
     y = pasoAlto_[1].procesar(y);
   }
   for (uint8_t i = 0; i < nNotch_; i++) y = notch_[i].procesar(y);
+  if (peineActivo_) y = peine_.procesar(y);
   if (pasoBajoActivo_) y = pasoBajo_.procesar(y);
   if (envolventeActiva_) {
     env_ = envolvente_.procesar(fabsf(y));  // rectificar y suavizar
